@@ -13,6 +13,7 @@
 ULOG_DECLARE_TAG(square);
 
 #define ULOG_TAG square
+#include "ulog.h"
 
 sig_atomic_t run = 1;
 
@@ -96,7 +97,7 @@ static int cmdMoveBy(airsdk::control::ControlInterface *controlInterface,
 	return 0;
 }
 
-static int cmdMoveBy(airsdk::control::ControlInterface *controlInterface,
+static int cmdMoveByTrajectory(airsdk::control::ControlInterface *controlInterface,
 		     const Trajectory &trajectory)
 {
 	ULOGI("Sending square side %zu/%zu", mMoveIndex + 1,
@@ -105,8 +106,8 @@ static int cmdMoveBy(airsdk::control::ControlInterface *controlInterface,
 		controlInterface,
 		trajectory.relTarget,
 		trajectory.heading,
-		1.0f,
-		1.0f,
+		10.0f,
+		10.0f,
 		45.0f);
 }
 
@@ -165,7 +166,7 @@ static void onReceived(airsdk::control::ControlInterface *controlInterface,
 		} else if (state == ARSDK_ARDRONE3_PILOTINGSTATE_FLYINGSTATECHANGED_STATE_HOVERING) {
 			ULOGI("Drone is hovering");
 			if (!mFirstTimeHovering && mMoveIndex < mRelativeTrajectory.size()) {
-				cmdMoveBy(controlInterface,
+				cmdMoveByTrajectory(controlInterface,
 					  mRelativeTrajectory[mMoveIndex]);
 				mMoveIndex++;
 				mFirstTimeHovering = true;
@@ -206,7 +207,7 @@ static void onReceived(airsdk::control::ControlInterface *controlInterface,
 			ULOGI("MoveBy completed successfully");
 			// check if there are more moves to execute and send the next one, otherwise return to home
 			if (mMoveIndex < mRelativeTrajectory.size()) {
-				cmdMoveBy(controlInterface,
+				cmdMoveByTrajectory(controlInterface,
 					  mRelativeTrajectory[mMoveIndex]);
 				mMoveIndex++;
 			} else {
@@ -260,9 +261,9 @@ int main(int argc, char *argv[])
 	mLandSent = false;
 	mRelativeTrajectory = {
 		{{2.0f, 0.0f, 0.0f}, 0.0f},
-		// {{0.0f, 2.0f, 0.0f}, 0.0f},
-		// {{-2.0f, 0.0f, 0.0f}, 0.0f},
-		// {{0.0f, -2.0f, 0.0f}, 0.0f},
+		{{0.0f, 2.0f, 0.0f}, 0.0f},
+		{{-2.0f, 0.0f, 0.0f}, 0.0f},
+		{{0.0f, -2.0f, 0.0f}, 0.0f},
 		{{0.0f, 0.0f, -4.0f}, 0.0f}
 	};
 
