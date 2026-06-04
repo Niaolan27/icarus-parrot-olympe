@@ -145,7 +145,7 @@ static void onReceived(airsdk::control::ControlInterface *controlInterface,
 {
 	// Send commands to the control interface switch case, that will react
 	// to the proper events and perform the appropriate moves
-	ULOGI("ControlInterface cmd received with id %d", cmd->id);
+	// ULOGI("ControlInterface cmd received with id %d", cmd->id);
 	switch (cmd->id) {
 	case ARSDK_ID_ARDRONE3_PILOTINGSTATE_FLYINGSTATECHANGED: {
 		int32_t state = 0;
@@ -163,6 +163,10 @@ static void onReceived(airsdk::control::ControlInterface *controlInterface,
 			mFirstTimeHovering = false;
 			mReturnHomeSent = false;
 			mLandSent = false;
+		} else if (mLandSent) {
+			ULOGI("Drone is landing");
+			cmdLand(controlInterface);
+			// do nothing, wait for the drone to land and reset the state on the next landed event
 		} else if (state == ARSDK_ARDRONE3_PILOTINGSTATE_FLYINGSTATECHANGED_STATE_HOVERING) {
 			ULOGI("Drone is hovering");
 			if (!mFirstTimeHovering && mMoveIndex < mRelativeTrajectory.size()) {
@@ -216,7 +220,12 @@ static void onReceived(airsdk::control::ControlInterface *controlInterface,
 			}
 		} else {
 			ULOGW("MoveBy ended with error=%d", error);
-			cmdRTH(controlInterface);
+			arsdk_cmd cmdEmergency;
+			arsdk_cmd_init(&cmdEmergency);
+			arsdk_cmd_enc_Ardrone3_Piloting_Emergency(&cmdEmergency);
+			controlInterface->send(&cmdEmergency);
+			arsdk_cmd_clear(&cmdEmergency);
+			// cmdRTH(controlInterface);
 		}
 
 		break;
