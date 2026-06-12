@@ -1,12 +1,18 @@
-# Running YOLO on the Anafi with AirSDK and NCNN
+# Running YOLO with AirSDK and NCNN
 
-This mission runs YOLO directly on the Anafi Ai/UKR as part of an AirSDK C++
-service. The model is exported to NCNN format, bundled in the mission assets,
-loaded by the drone at service startup, and executed against frames received
-from the drone video pipeline.
+This mission runs YOLO directly inside an AirSDK C++ service. The model is
+exported to NCNN format, bundled as mission assets, loaded at service startup,
+and executed against frames received from the drone video pipeline.
 
-The important idea is that inference happens on the drone. We do not stream
-frames to a laptop for detection.
+The important idea is that inference happens in the mission service. Frames are
+not streamed to a laptop for detection.
+
+The current `mission.yaml` enables the `Anafi Ai Simulator` target by default.
+The physical Anafi Ai and Anafi UKR target entries are present but commented
+out; enable the right target only when you are ready to run on that hardware.
+The service configuration keeps the legacy road-following control fields
+motion-neutral, so this example logs detections and does not intentionally
+command drone movement.
 
 ## What Is Included
 
@@ -15,10 +21,10 @@ frames to a laptop for detection.
 - `deps/yolo_detector/` is a small C++ wrapper around NCNN. It loads the YOLO
   model, preprocesses frames, runs inference, decodes YOLO-style outputs, and
   applies non-maximum suppression.
-- `assets/models/model.ncnn.param` and `assets/models/model.ncnn.bin` are the
-  exported YOLO model files copied into the mission package.
+- `assets/models/` is where exported NCNN model files belong before packaging.
+  The default config expects `model.ncnn.param` and `model.ncnn.bin`.
 - `assets/etc/services/cv_road.cfg` configures the model paths, input size,
-  blob names, and detection thresholds.
+  blob names, thresholds, and neutral legacy road-following fields.
 - `services/cv_road/` is the AirSDK service that receives camera frames through
   video IPC and calls the YOLO detector.
 
@@ -55,7 +61,16 @@ services:
   cv_road:
     lang: c++
     depends:
+      - libconfigreader
+      - libfutils
+      - libmsghub
+      - libputils
+      - libtelemetry
+      - libvideo-ipc
+      - libvideo-ipc-client-config
+      - msghub::cv_road
       - opencv4
+      - protobuf
       - yolo_detector
 ```
 
@@ -82,6 +97,11 @@ assets/models/model.ncnn.bin
 If the exported files use different names, either rename them to match the
 current config or update `assets/etc/services/cv_road.cfg`.
 
+Model binaries can be large. If you do not want to keep them in Git, keep a
+placeholder such as `assets/models/.gitkeep`, ignore the generated model files,
+and copy the real `.param` and `.bin` files into `assets/models/` before
+building the mission.
+
 ## Model Configuration
 
 The service reads YOLO settings from `assets/etc/services/cv_road.cfg`:
@@ -97,8 +117,10 @@ yoloConfidenceThreshold = 0.1;
 yoloNmsThreshold = 0.45;
 ```
 
-Paths are relative to the mission root on the drone. The current values resolve
-to the model files packaged from `assets/models/`.
+Paths are resolved against the installed mission root. During packaging, files
+from `assets/` are copied into that root, so the config path
+`models/model.ncnn.bin` resolves to the file that was placed locally at
+`assets/models/model.ncnn.bin`.
 
 Leaving `yoloInputBlob` and `yoloOutputBlob` empty tells the detector to use the
 first input and first output exposed by the NCNN model. If an exported model has
@@ -108,9 +130,12 @@ NCNN `.param` file.
 `yoloInputWidth` and `yoloInputHeight` must match the size used during export.
 The detector letterboxes each camera frame into that size before inference.
 
+The other fields in the `road_following` section are legacy fields still read by
+the service. In this example they are set to neutral values.
+
 ## Runtime Flow
 
-1. AirSDK starts the `cv_road` C++ service on the drone.
+1. AirSDK starts the `cv_road` C++ service in the selected target environment.
 2. `Processing` loads `cv_road.cfg`.
 3. The configured NCNN `.param` and `.bin` files are loaded by
    `yolo_detector::Detector`.
@@ -119,7 +144,8 @@ The detector letterboxes each camera frame into that size before inference.
 6. The detector resizes and letterboxes the image, normalizes pixels, and sends
    it through NCNN.
 7. YOLO detections are decoded into class id, confidence, and bounding box.
-8. Detections are logged with `ulog`.
+8. Detections are logged with `ulog`; they are not currently used to drive a
+   guidance behavior.
 
 The current detector runs NCNN on CPU:
 
@@ -140,8 +166,10 @@ airsdk build
 airsdk install --default
 ```
 
-After installing on a physical drone, give the drone time to reboot and start
-the mission services before checking logs.
+For simulator use, make sure the simulator target selected in `mission.yaml`
+matches the AirSDK environment you are installing to. After installing on a
+physical drone, give the drone time to reboot and start the mission services
+before checking logs.
 
 ## Verifying On The Drone
 
@@ -163,6 +191,10 @@ Useful messages include:
 If the model fails to load, check that the files exist in `assets/models/`, that
 the paths in `cv_road.cfg` match, and that the exported NCNN files are compatible
 with the NCNN source version in `deps/ncnn/`.
+
+If the service starts but logs `YOLO detector is not ready`, the model load
+failed earlier in startup. Look above that warning for the exact NCNN load
+error and resolved file path.
 
 ## Swapping Models
 
