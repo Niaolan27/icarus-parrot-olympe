@@ -51,6 +51,21 @@ to follow the road.
 
 The guidance mode makes the drone follow the road based on the calculated movements from the service.
 
-## yolo-test
-Ignore this for now. I am trying to see if I can run a simple YOLO algorithm onboard the drone itself.
+## yolo-cpp-test-so
+This is a mission to demonstrate the ability to run custom code onboard the drone. In this example, I managed to run
+YOLO26n natively on the drone. 
+
+To do so, I included NCNN as a dependency of the mission. I added the cross-compiled .so file and header files to 
+the mission. I also updated the `atom.mk` file. NCNN is a lightweight neural network framework written in C++, optimized for edge devices. This 
+allows me to run the pretrained YOLO26n model on the drone. I chose to go with NCNN instead of PyTorch/Tensorflow simply
+because those frameworks are way too large to be included as a dependency. You are constrained by the storage available
+on the drone.
+
+As for the model weights, you can add them under `assets/`. 
+
+You also need to update the `mission.yaml` file to reflect the additional dependencies that you add.
+
+To see that the model runs, you want to set up the environment and drone, then install the mission into the drone.
+Once the mission is installed, the YOLO service automatically starts running. To see the results of the inference,
+you need to run `adb shell` and use `ulogcat | grep YOLO` to see log messages related to the YOLO service. 
 
