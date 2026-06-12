@@ -47,7 +47,7 @@
 
 #include "listener.hpp"
 #include "video.hpp"
-#include <yolo_detector/detector.hpp>
+#include "detector.hpp"
 
 /* Messages exchanged with Flight Supervisor */
 #include <road_runner/cv_road/messages.msghub.h>

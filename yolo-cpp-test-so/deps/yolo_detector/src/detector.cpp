@@ -1,4 +1,4 @@
-#include "yolo_detector/detector.hpp"
+#include "detector.hpp"
 
 #include <algorithm>
 #include <cmath>
