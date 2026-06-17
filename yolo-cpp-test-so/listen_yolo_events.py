@@ -9,7 +9,7 @@ os.environ.setdefault("PYOPENGL_PLATFORM", "glx")
 import olympe
 
 
-DEFAULT_DRONE_IP = "10.202.0.1"
+DEFAULT_DRONE_IP = "192.168.42.1"
 DEFAULT_MISSION_PATH = (
     Path(__file__).resolve().parent
     / ".airsdk/out/yolo_test-anafi2_classic/images/com.parrot.missions.samples.yolo.tar.gz"
@@ -85,7 +85,7 @@ def main():
 
     with drone.mission.from_path(str(mission_path)):
         from olympe.airsdk.messages.parrot.missions.samples.yolo.Event import (
-            YoloDetection,
+            YoloDetections,
         )
 
         print(f"Connecting to {args.drone_ip}...")
@@ -96,7 +96,7 @@ def main():
         try:
             while drone.connected:
                 expectation = drone(
-                    YoloDetection(_policy="wait")
+                    YoloDetections(_policy="wait")
                 ).wait(_timeout=args.timeout)
 
                 if not expectation.success():
@@ -104,17 +104,20 @@ def main():
                     continue
 
                 for event in expectation.matched_events():
-                    payload = _event_payload(event)
-                    if payload is None:
-                        print(f"Received yolo_detection event: {event}")
-                    else:
-                        print(
-                            "Received yolo_detection event: "
-                            f"{_format_detection(payload)}"
-                        )
+                    for detection in event.args["detections"]:
+                        print(f"Received yolo_detections event: {detection}")
+                    print(f"Received event: {event}")
+                #     payload = _event_payload(event)
+                #     if payload is None:
+                #         print(f"Received yolo_detections event: {event}")
+                #     else:
+                #         print(
+                #             "Received yolo_detections event: "
+                #             f"{_format_detection(payload)}"
+                #         )
 
-                if args.once:
-                    break
+                # if args.once:
+                #     break
         except KeyboardInterrupt:
             print("Stopping listener.")
         finally:

@@ -19,7 +19,9 @@ DEFAULT_MISSION_PATH = (
     / ".airsdk/out/yolo_test-anafi2_classic/images/com.parrot.missions.samples.yolo.tar.gz"
 )
 
-TIMEOUT = 60.0  # Timeout in seconds for waiting for yolo_detection events
+TIMEOUT = 0.5  # Timeout in seconds for waiting for yolo_detection events
+BBOX_SOURCE_WIDTH = 1280
+BBOX_SOURCE_HEIGHT = 720
 
 YOLO_CLASS_NAMES = {
     0: "person",
@@ -124,45 +126,55 @@ class SimpleOlympeStream:
 
     def _on_frame_received(self, olympe_frame):
         """ This method runs asynchronously at ~30 FPS for every frame """
+
+        WINDOW_NAME = "Parrot ANAFI Ai - Pure Olympe Stream"
+
+        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(WINDOW_NAME, 1280, 720)
         cv2_frame = self._frame_to_bgr(olympe_frame)
 
         if cv2_frame is not None:
+            frame_height, frame_width = cv2_frame.shape[:2]
+            print(f"Received frame size: {frame_width}x{frame_height}")
         
             # Draw the bounding box if available
             with global_bb_lock:
-                if global_bb is not None:
-                    x, y, w, h = (
-                        int(global_bb.x),
-                        int(global_bb.y),
-                        int(global_bb.width),
-                        int(global_bb.height),
-                    )
-                    print(f"Drawing bounding box: x={x}, y={y}, w={w}, h={h}")
-                    cv2.rectangle(
-                        cv2_frame,
-                        (x, y),
-                        (x + w, y + h),
-                        (0, 255, 0),  # Green color for the bounding box
-                        2,  # Thickness of the rectangle
-                    )
+                if global_bb is not None and len(global_bb) > 0:
+                    for bb in global_bb:
+                        x, y, w, h = (
+                            self._scale_x(bb.x, frame_width),
+                            self._scale_y(bb.y, frame_height),
+                            self._scale_x(bb.width, frame_width),
+                            self._scale_y(bb.height, frame_height),
+                        )
+                        print(f"Drawing bounding box: x={x}, y={y}, w={w}, h={h}")
+                        cv2.rectangle(
+                            cv2_frame,
+                            (x, y),
+                            (x + w, y + h),
+                            (0, 255, 0),  # Green color for the bounding box
+                            2,  # Thickness of the rectangle
+                        )
 
-                    # Draw the label and confidence score if available
-                    yolo_class = YOLO_CLASS_NAMES.get(global_bb.class_id, "Unknown")
-                    label = f"{yolo_class}: {global_bb.confidence:.2f}"
-                    cv2.putText(
-                        cv2_frame,
-                        label,
-                        (x, y - 10),  # Position above the bounding box
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,  # Font scale
-                        (0, 255, 0),  # Green color for the text
-                        2,  # Thickness of the text
-                    )
+                        # Draw the label and confidence score if available
+                        yolo_class = YOLO_CLASS_NAMES.get(bb.class_id, "Unknown")
+                        label = f"{yolo_class}: {bb.confidence:.2f}"
+                        cv2.putText(
+                            cv2_frame,
+                            label,
+                            (x, y - 10),  # Position above the bounding box
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,  # Font scale
+                            (0, 255, 0),  # Green color for the text
+                            2,  # Thickness of the text
+                        )
                 
 
 
             # Render the frame to a local window on your monitor
-            cv2.imshow("Parrot ANAFI Ai - Pure Olympe Stream", cv2_frame)
+            display_frame = cv2.resize(cv2_frame, (1280, 720))
+            cv2.imshow(WINDOW_NAME, display_frame)
+            cv2.imshow(WINDOW_NAME, cv2_frame)
             
             # A 1ms waitKey is mandatory to give OpenCV time to refresh the GUI window
             cv2.waitKey(1)
@@ -200,6 +212,12 @@ class SimpleOlympeStream:
             conversion = cv2.COLOR_YUV2BGR_I420
 
         return cv2.cvtColor(yuv_frame, conversion)
+
+    def _scale_x(self, value, frame_width):
+        return int(round(value * frame_width / BBOX_SOURCE_WIDTH))
+
+    def _scale_y(self, value, frame_height):
+        return int(round(value * frame_height / BBOX_SOURCE_HEIGHT))
 
     def stop(self):
         print("Shutting down stream and disconnecting...")
@@ -247,6 +265,8 @@ def _format_detection(detection):
     )
 
 def listen_yolo_events(drone):
+    global global_bb
+
     mission_path = Path(DEFAULT_MISSION_PATH).expanduser().resolve()
     if not mission_path.exists():
         raise FileNotFoundError(
@@ -257,46 +277,69 @@ def listen_yolo_events(drone):
     print(f"Using mission archive: {mission_path}")
     with drone.mission.from_path(str(mission_path)):
         from olympe.airsdk.messages.parrot.missions.samples.yolo.Event import (
-            YoloDetection,
+            YoloDetections,
         )
 
         print("Waiting for yolo_detection events. Press Ctrl-C to stop.")
         try:
             while drone.connected:
+                
                 expectation = drone(
-                    YoloDetection(_policy="wait")
+                    YoloDetections(_policy="wait")
                 ).wait(_timeout=TIMEOUT)
 
                 if not expectation.success():
-                    print("No yolo_detection event received before timeout.")
+                    
+                    with global_bb_lock:
+                        global_bb = []  # Clear the bounding boxes if no event is received
+                    print("No yolo_detections event received before timeout.")
                     continue
 
+
+                 # TODO - Add logic to extract bounding box data from the event and update global_bb
+                
+                detections = []
                 for event in expectation.matched_events():
-                    print(f"Received yolo_detection event: {event}")
+                    print(f"Received yolo_detections event: {event}")
                     # print(f"class id : {event.args['class_id']}")
                     # print(f"type of event: {type(event)}")
-                    class_id = event.args['class_id']
-                    confidence = event.args['confidence']
-                    x = event.args['x']
-                    y = event.args['y']
-                    width = event.args['width']
-                    height = event.args['height']
-                    # acquire lock to update global_bb safely
-                    with global_bb_lock:
-                        global global_bb
-                        if global_bb is None:
-                            global_bb = BoundingBox(class_id, confidence, x, y, width, height)
-                            print(f"Initialized global bounding box: {global_bb.__dict__}")
-                        else:
-                            global_bb.class_id = class_id
-                            global_bb.confidence = confidence
-                            global_bb.x = x
-                            global_bb.y = y
-                            global_bb.width = width
-                            global_bb.height = height
-                            print(f"Updated global bounding box: {global_bb.__dict__}")
+                    # class_id = event.args['class_id']
+                    # confidence = event.args['confidence']
+                    # x = event.args['x']
+                    # y = event.args['y']
+                    # width = event.args['width']
+                    # height = event.args['height']
+                    # # acquire lock to update global_bb safely
+                    # with global_bb_lock:
+                    #     global global_bb
+                    #     if global_bb is None:
+                    #         global_bb = BoundingBox(class_id, confidence, x, y, width, height)
+                    #         print(f"Initialized global bounding box: {global_bb.__dict__}")
+                    #     else:
+                    #         global_bb.class_id = class_id
+                    #         global_bb.confidence = confidence
+                    #         global_bb.x = x
+                    #         global_bb.y = y
+                    #         global_bb.width = width
+                    #         global_bb.height = height
+                    #         print(f"Updated global bounding box: {global_bb.__dict__}")
+                    #loop through detections
+                    for detection in event.args["detections"]:
+                        class_id = detection['class_id']
+                        confidence = detection['confidence']
+                        x = detection['x']
+                        y = detection['y']
+                        width = detection['width']
+                        height = detection['height']
+
+                        detections.append(BoundingBox(class_id, confidence, x, y, width, height))
+                        print(f"Received detection: class_id={class_id}, confidence={confidence}, x={x}, y={y}, width={width}, height={height}")
+
+                # acquire lock to update global_bb safely
+                with global_bb_lock:
+                    global_bb = detections 
                 
-                # TODO - Add logic to extract bounding box data from the event and update global_bb
+               
 
         except KeyboardInterrupt:
             print("Stopping listener.")

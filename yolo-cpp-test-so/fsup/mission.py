@@ -121,8 +121,8 @@ class Mission(AbstractMission):
                 {
                     msg_id(
                         rr_service_msgs.Event,
-                        "yolo_detection",
-                    ): self._relay_yolo_detection,
+                        "yolo_detections",
+                    ): self._relay_yolo_detections,
                 }
             )
         )
@@ -159,17 +159,26 @@ class Mission(AbstractMission):
         self.airsdk_service_cv_road_handler_messages.cmd.sender.enable_cv(enable)  # noqa: E501
         self.log.info(f"cv_road enable {enable}")
 
-    def _relay_yolo_detection(self, *args):
+    def _relay_yolo_detections(self, *args):
         msg = args[-1]
-        yolo_detection = msg.yolo_detection
+        service_detections = msg.yolo_detections
+        detections = []
 
-        self.log.info("Relaying yolo_detection event: %s", yolo_detection)
+        for service_detection in service_detections.detections:
+            detections.append(
+                {
+                    "class_id": service_detection.class_id,
+                    "confidence": service_detection.confidence,
+                    "x": service_detection.x,
+                    "y": service_detection.y,
+                    "width": service_detection.width,
+                    "height": service_detection.height,
+                }
+            )
 
-        self.ext_ui_msgs.evt.sender.yolo_detection(
-            class_id=yolo_detection.class_id,
-            confidence=yolo_detection.confidence,
-            x=yolo_detection.x,
-            y=yolo_detection.y,
-            width=yolo_detection.width,
-            height=yolo_detection.height,
+        self.log.info(
+            "Relaying yolo_detections event: %d detections",
+            len(detections),
         )
+
+        self.ext_ui_msgs.evt.sender.yolo_detections(detections=detections)

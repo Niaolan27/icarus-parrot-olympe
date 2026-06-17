@@ -19,6 +19,10 @@ message YoloDetection {
     int32 height = 6;
 }
 
+message YoloDetections {
+    repeated YoloDetection detections = 1;
+}
+
 message Event {
     reserved 2;
     reserved "yolo_inference_done";
@@ -26,5 +30,6 @@ message Event {
     oneof id {
         google.protobuf.Empty road_lost = 1;
         YoloDetection yolo_detection = 3;
+        YoloDetections yolo_detections = 4;
     }
 }

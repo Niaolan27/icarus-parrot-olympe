@@ -24,11 +24,16 @@ message YoloDetection {
     int32 height = 6;
 }
 
+message YoloDetections {
+    repeated YoloDetection detections = 1;
+}
+
 message Event {
     reserved 1;
     reserved "yolo_inference_done";
 
     oneof id {
         YoloDetection yolo_detection = 2;
+        YoloDetections yolo_detections = 3;
     }
 }
