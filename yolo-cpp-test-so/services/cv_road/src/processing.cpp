@@ -114,7 +114,9 @@ static void do_step(const struct vipc_frame *frame,
 		    struct roadData *road_data,
 		    bool &is_road_detected,
 		    cv::ColorConversionCodes colorConversionCodes,
-		    yolo_detector::Detector &yoloDetector)
+		    yolo_detector::Detector &yoloDetector,
+		    float &yolo_detection_count,
+		    bool &yolo_inference_done)
 {
 
 	cv::Mat frame_ref;
@@ -142,6 +144,9 @@ static void do_step(const struct vipc_frame *frame,
 	y0), where (vx, vy) is a normalized vector collinear to the line and
 	(x0, y0) is a point on the line. */
 	cv::Vec4f line;
+
+	yolo_detection_count = 0.f;
+	yolo_inference_done = false;
 
 	if (frame->num_planes == 2) {
 		/* NV12 */
@@ -183,6 +188,8 @@ static void do_step(const struct vipc_frame *frame,
 	if (yoloDetector.isReady()) {
 		std::vector<yolo_detector::Detection> detections =
 			yoloDetector.detect(frame_ref);
+		yolo_detection_count = static_cast<float>(detections.size());
+		yolo_inference_done = true;
 		ULOGI("YOLO detections: %zu", detections.size());
 		for (const auto &detection : detections) {
 			ULOGI("YOLO class=%d confidence=%.3f box=[x=%d,y=%d,w=%d,h=%d]",
@@ -257,6 +264,8 @@ void Processing::threadEntry()
 	std::unique_lock<std::mutex> lk(mMutex);
 
 	struct vipc_frame frame;
+	float yolo_detection_count;
+	bool yolo_inference_done;
 
 	while (!mStopRequested) {
 		/* Atomically unlock the mutex, wait for condition and then
@@ -286,8 +295,12 @@ void Processing::threadEntry()
 			&mRoadData,
 			mIsRoadDetected,
 			mColorConversionCodes,
-			mYoloDetector);
+			mYoloDetector,
+			yolo_detection_count,
+			yolo_inference_done);
 		mMutex.lock();
+		if (yolo_inference_done)
+			this->yoloInferenceDone(yolo_detection_count);
 
 		mTelemetryConsumer->getSample(nullptr,
 					      telemetry::Method::TLM_LATEST);

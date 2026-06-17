@@ -13,5 +13,6 @@ message Command {
 message Event {
     oneof id {
         google.protobuf.Empty road_lost = 1;
+        float yolo_inference_done = 2;
     }
 }

@@ -15,10 +15,13 @@ targets:
 fsup:
   lang: "python"
   depends:
+    - msghub::mission_ui
     - msghub::cv_road
 msghub:
   - name: cv_road
     include_path: road_runner/cv_road
+  - name: mission_ui
+    include_path: parrot
 deps:
   ncnn:
     type: alchemy

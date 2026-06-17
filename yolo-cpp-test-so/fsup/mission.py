@@ -29,6 +29,7 @@
 
 # fsup mandatory library
 from fsup.genmission import AbstractMission
+from msghub_utils import msg_id
 
 ###################################################
 # Stages and transitions
@@ -60,6 +61,9 @@ from fsup.missions.default.mission import TRANSITIONS as DEF_TRANSITIONS
 # AirSDK Service messages (cv_road)
 import road_runner.cv_road.messages_pb2 as rr_service_msgs
 
+# AirSDK/Olympe-facing mission messages
+import parrot.missions.samples.yolo.airsdk.messages_pb2 as yolo_msgs
+
 ###################################################
 # Messages channel
 
@@ -73,11 +77,18 @@ class Mission(AbstractMission):
     def __init__(self, env):
         super().__init__(env)
 
+        # Olympe-facing mission messages
+        self.ext_ui_msgs = None
+
         # AIRSDK SERVICE (cv_road) <---> FSUP
         self.airsdk_service_cv_road_messages_channel = None
         self.airsdk_service_cv_road_handler_messages = None
+        self.airsdk_service_cv_road_messages_observer = None
 
     def on_load(self):
+        # Olympe-facing mission messages
+        self.ext_ui_msgs = self.env.make_airsdk_service_pair(yolo_msgs)
+
         # AIRSDK SERVICE (cv_road) <---> FSUP
         self.airsdk_service_cv_road_messages_channel = (
             self.mc.start_client_channel(
@@ -90,12 +101,29 @@ class Mission(AbstractMission):
         self.mc.stop_channel(self.airsdk_service_cv_road_messages_channel)
         self.airsdk_service_cv_road_messages_channel = None
 
+        # Olympe-facing mission messages
+        self.ext_ui_msgs = None
+
     def on_activate(self):
+        # Olympe-facing mission messages
+        self.ext_ui_msgs.attach(self.env.airsdk_channel, True)
+
         self.airsdk_service_cv_road_handler_messages = (
             self.mc.attach_client_service_pair(
                 self.airsdk_service_cv_road_messages_channel,
                 rr_service_msgs,
                 forward_events=True,
+            )
+        )
+
+        self.airsdk_service_cv_road_messages_observer = (
+            self.airsdk_service_cv_road_handler_messages.evt.observe(
+                {
+                    msg_id(
+                        rr_service_msgs.Event,
+                        "yolo_inference_done",
+                    ): self._relay_yolo_inference_done,
+                }
             )
         )
 
@@ -105,10 +133,14 @@ class Mission(AbstractMission):
         # AIRSDK SERVICE (cv_road)
         self._send_cv_road_enable(False)
 
+        self.airsdk_service_cv_road_messages_observer.unobserve()
+        self.airsdk_service_cv_road_messages_observer = None
+
         self.mc.detach_client_service_pair(self.airsdk_service_cv_road_handler_messages)  # noqa: E501
         self.airsdk_service_cv_road_handler_messages = None
 
-        self.airsdk_service_cv_road_messages_channel = None
+        # Olympe-facing mission messages
+        self.ext_ui_msgs.detach()
 
     def states(self):
         return [
@@ -126,3 +158,9 @@ class Mission(AbstractMission):
     def _send_cv_road_enable(self, enable):
         self.airsdk_service_cv_road_handler_messages.cmd.sender.enable_cv(enable)  # noqa: E501
         self.log.info(f"cv_road enable {enable}")
+
+    def _relay_yolo_inference_done(self, *args):
+        msg = args[-1]
+        self.ext_ui_msgs.evt.sender.yolo_inference_done(
+            msg.yolo_inference_done
+        )
