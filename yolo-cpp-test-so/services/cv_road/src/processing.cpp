@@ -30,6 +30,7 @@
  */
 
 #include <opencv2/imgproc/types_c.h>
+#include <algorithm>
 #include <vector>
 
 #include "processing.hpp"
@@ -39,6 +40,9 @@
 ULOG_DECLARE_TAG(ULOG_TAG);
 
 #define CFG_CHECK(E) ULOG_ERRNO_RETURN_ERR_IF(E < 0, EINVAL)
+
+using YoloDetection =
+	::road_runner::service::cv_road::messages::YoloDetection;
 
 static std::string resolve_mission_path(const std::string &path)
 {
@@ -115,8 +119,8 @@ static void do_step(const struct vipc_frame *frame,
 		    bool &is_road_detected,
 		    cv::ColorConversionCodes colorConversionCodes,
 		    yolo_detector::Detector &yoloDetector,
-		    float &yolo_detection_count,
-		    bool &yolo_inference_done)
+		    YoloDetection &yolo_detection,
+		    bool &yolo_detection_ready)
 {
 
 	cv::Mat frame_ref;
@@ -145,8 +149,8 @@ static void do_step(const struct vipc_frame *frame,
 	(x0, y0) is a point on the line. */
 	cv::Vec4f line;
 
-	yolo_detection_count = 0.f;
-	yolo_inference_done = false;
+	yolo_detection.Clear();
+	yolo_detection_ready = false;
 
 	if (frame->num_planes == 2) {
 		/* NV12 */
@@ -188,9 +192,31 @@ static void do_step(const struct vipc_frame *frame,
 	if (yoloDetector.isReady()) {
 		std::vector<yolo_detector::Detection> detections =
 			yoloDetector.detect(frame_ref);
-		yolo_detection_count = static_cast<float>(detections.size());
-		yolo_inference_done = true;
 		ULOGI("YOLO detections: %zu", detections.size());
+		if (!detections.empty()) {
+			auto best_detection = std::max_element(
+				detections.begin(),
+				detections.end(),
+				[](const yolo_detector::Detection &lhs,
+				   const yolo_detector::Detection &rhs) {
+					return lhs.confidence < rhs.confidence;
+				});
+
+			yolo_detection.set_class_id(best_detection->classId);
+			yolo_detection.set_confidence(best_detection->confidence);
+			yolo_detection.set_x(best_detection->box.x);
+			yolo_detection.set_y(best_detection->box.y);
+			yolo_detection.set_width(best_detection->box.width);
+			yolo_detection.set_height(best_detection->box.height);
+			yolo_detection_ready = true;
+			ULOGI("YOLO best detection: class=%d confidence=%.3f box=[x=%d,y=%d,w=%d,h=%d]",
+			      yolo_detection.class_id(),
+			      yolo_detection.confidence(),
+			      yolo_detection.x(),
+			      yolo_detection.y(),
+			      yolo_detection.width(),
+			      yolo_detection.height());
+		}
 		for (const auto &detection : detections) {
 			ULOGI("YOLO class=%d confidence=%.3f box=[x=%d,y=%d,w=%d,h=%d]",
 			      detection.classId,
@@ -264,8 +290,8 @@ void Processing::threadEntry()
 	std::unique_lock<std::mutex> lk(mMutex);
 
 	struct vipc_frame frame;
-	float yolo_detection_count;
-	bool yolo_inference_done;
+	YoloDetection yolo_detection;
+	bool yolo_detection_ready;
 
 	while (!mStopRequested) {
 		/* Atomically unlock the mutex, wait for condition and then
@@ -296,11 +322,11 @@ void Processing::threadEntry()
 			mIsRoadDetected,
 			mColorConversionCodes,
 			mYoloDetector,
-			yolo_detection_count,
-			yolo_inference_done);
+			yolo_detection,
+			yolo_detection_ready);
 		mMutex.lock();
-		if (yolo_inference_done)
-			this->yoloInferenceDone(yolo_detection_count);
+		if (yolo_detection_ready)
+			this->yoloDetection(yolo_detection);
 
 		mTelemetryConsumer->getSample(nullptr,
 					      telemetry::Method::TLM_LATEST);

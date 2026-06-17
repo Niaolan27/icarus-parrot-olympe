@@ -121,8 +121,8 @@ class Mission(AbstractMission):
                 {
                     msg_id(
                         rr_service_msgs.Event,
-                        "yolo_inference_done",
-                    ): self._relay_yolo_inference_done,
+                        "yolo_detection",
+                    ): self._relay_yolo_detection,
                 }
             )
         )
@@ -159,8 +159,17 @@ class Mission(AbstractMission):
         self.airsdk_service_cv_road_handler_messages.cmd.sender.enable_cv(enable)  # noqa: E501
         self.log.info(f"cv_road enable {enable}")
 
-    def _relay_yolo_inference_done(self, *args):
+    def _relay_yolo_detection(self, *args):
         msg = args[-1]
-        self.ext_ui_msgs.evt.sender.yolo_inference_done(
-            msg.yolo_inference_done
+        yolo_detection = msg.yolo_detection
+
+        self.log.info("Relaying yolo_detection event: %s", yolo_detection)
+
+        self.ext_ui_msgs.evt.sender.yolo_detection(
+            class_id=yolo_detection.class_id,
+            confidence=yolo_detection.confidence,
+            x=yolo_detection.x,
+            y=yolo_detection.y,
+            width=yolo_detection.width,
+            height=yolo_detection.height,
         )

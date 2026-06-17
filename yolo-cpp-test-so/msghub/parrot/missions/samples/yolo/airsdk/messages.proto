@@ -15,8 +15,20 @@ message Command {
     }
 }
 
+message YoloDetection {
+    int32 class_id = 1;
+    float confidence = 2;
+    int32 x = 3;
+    int32 y = 4;
+    int32 width = 5;
+    int32 height = 6;
+}
+
 message Event {
+    reserved 1;
+    reserved "yolo_inference_done";
+
     oneof id {
-        float yolo_inference_done = 1;
+        YoloDetection yolo_detection = 2;
     }
 }

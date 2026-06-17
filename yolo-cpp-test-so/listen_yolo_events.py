@@ -21,15 +21,35 @@ def _event_payload(event):
     if callable(args):
         args = args()
 
-    if isinstance(args, dict) and "yolo_inference_done" in args:
-        return args["yolo_inference_done"]
+    if isinstance(args, dict):
+        if "yolo_detection" in args:
+            return args["yolo_detection"]
+        if {"class_id", "confidence", "x", "y", "width", "height"}.issubset(
+            args
+        ):
+            return args
 
     return None
 
 
+def _field(detection, name):
+    if isinstance(detection, dict):
+        return detection[name]
+    return getattr(detection, name)
+
+
+def _format_detection(detection):
+    return (
+        f"class_id={_field(detection, 'class_id')} "
+        f"confidence={_field(detection, 'confidence'):.3f} "
+        f"box=(x={_field(detection, 'x')}, y={_field(detection, 'y')}, "
+        f"w={_field(detection, 'width')}, h={_field(detection, 'height')})"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Print YOLO detection-count events received through Olympe."
+        description="Print the best YOLO bounding-box event received through Olympe."
     )
     parser.add_argument(
         "--drone-ip",
@@ -50,7 +70,7 @@ def main():
     parser.add_argument(
         "--once",
         action="store_true",
-        help="Exit after receiving the first yolo_inference_done event.",
+        help="Exit after receiving the first yolo_detection event.",
     )
     args = parser.parse_args()
 
@@ -65,32 +85,32 @@ def main():
 
     with drone.mission.from_path(str(mission_path)):
         from olympe.airsdk.messages.parrot.missions.samples.yolo.Event import (
-            yolo_inference_done,
+            YoloDetection,
         )
 
         print(f"Connecting to {args.drone_ip}...")
         if not drone.connect():
             raise RuntimeError(f"Failed to connect to drone at {args.drone_ip}")
 
-        print("Waiting for yolo_inference_done events. Press Ctrl-C to stop.")
+        print("Waiting for yolo_detection events. Press Ctrl-C to stop.")
         try:
             while drone.connected:
                 expectation = drone(
-                    yolo_inference_done(_policy="wait")
+                    YoloDetection(_policy="wait")
                 ).wait(_timeout=args.timeout)
 
                 if not expectation.success():
-                    print("No yolo_inference_done event received before timeout.")
+                    print("No yolo_detection event received before timeout.")
                     continue
 
                 for event in expectation.matched_events():
                     payload = _event_payload(event)
                     if payload is None:
-                        print(f"Received yolo_inference_done event: {event}")
+                        print(f"Received yolo_detection event: {event}")
                     else:
                         print(
-                            "Received yolo_inference_done event: "
-                            f"detection_count={payload}"
+                            "Received yolo_detection event: "
+                            f"{_format_detection(payload)}"
                         )
 
                 if args.once:
