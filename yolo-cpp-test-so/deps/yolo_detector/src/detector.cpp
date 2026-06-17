@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include <ncnn/net.h>
+#include <net.h>
 
 #define ULOG_TAG yolo_detector
 #include <ulog.hpp>

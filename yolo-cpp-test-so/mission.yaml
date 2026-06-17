@@ -1,14 +1,14 @@
 api_version: 3
 kind: Mission
 metadata:
-  uid: com.parrot.missions.samples.road_runner
-  name: road_runner
+  uid: com.parrot.missions.samples.yolo
+  name: yolo_test
   description: Run the CV service without commanding drone movement.
   version: "0.0.0"
 targets:
   # Important: Make sure you understand the behaviour of this mission before run it on a physical drone.
-  # Anafi Ai:
-  Anafi Ai Simulator:
+  Anafi Ai:
+  # Anafi Ai Simulator:
   # Important: Make sure you understand the behaviour of this mission before run it on a physical drone.
   # Anafi UKR:
   # Anafi UKR Simulator:
