@@ -84,7 +84,7 @@ Export the trained YOLO model into NCNN's two-file format:
 For Ultralytics YOLO models, the typical export command is:
 
 ```bash
-yolo export model=path/to/best.pt format=ncnn imgsz=640
+yolo export model=path/to/best.pt format=ncnn imgsz=320
 ```
 
 Then copy the exported files into:
@@ -111,10 +111,11 @@ yoloParamPath = "models/model.ncnn.param";
 yoloBinPath = "models/model.ncnn.bin";
 yoloInputBlob = "";
 yoloOutputBlob = "";
-yoloInputWidth = 640;
-yoloInputHeight = 640;
+yoloInputWidth = 320;
+yoloInputHeight = 320;
 yoloConfidenceThreshold = 0.1;
 yoloNmsThreshold = 0.45;
+STREAM_YOLO_DETECTIONS = true;
 ```
 
 Paths are resolved against the installed mission root. During packaging, files
@@ -129,6 +130,9 @@ NCNN `.param` file.
 
 `yoloInputWidth` and `yoloInputHeight` must match the size used during export.
 The detector letterboxes each camera frame into that size before inference.
+
+Set `STREAM_YOLO_DETECTIONS` to `true` to publish `yolo_detections` events to
+Olympe, or `false` to keep detections local to service logs.
 
 The other fields in the `road_following` section are legacy fields still read by
 the service. In this example they are set to neutral values.
@@ -195,6 +199,21 @@ with the NCNN source version in `deps/ncnn/`.
 If the service starts but logs `YOLO detector is not ready`, the model load
 failed earlier in startup. Look above that warning for the exact NCNN load
 error and resolved file path.
+
+## Visualizing YOLO detections on host laptop
+
+You can set the `STREAM_YOLO_DETECTIONS` flag in `cv_road.cfg` to true if you want
+to stream the YOLO detections from the drone back to a client computer. 
+
+`draw_bb.py` is a Python script that captures the video stream from the drone. It also
+listens to YOLO detectioncevents being published, and overlays the bounding boxes
+over the video frames. 
+
+The client computer has to be connected to the drone Wifi for this to work.
+
+One thing to note, the YOLO inference is very slow on the drone. Hence, the 
+bounding boxes arrive later than the corresponding video frame. If the drone is 
+moving, it will look like the bounding boxes are in the wrong position.
 
 ## Swapping Models
 

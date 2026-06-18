@@ -33,6 +33,8 @@ static float intersectionOverUnion(const cv::Rect &a, const cv::Rect &b)
 	return unionArea <= 0.f ? 0.f : intersection / unionArea;
 }
 
+
+// NMS is used to remove overlapping bounding boxes that correspond to the same object.
 static std::vector<Detection> nonMaximumSuppression(
 	std::vector<Candidate> &candidates,
 	float nmsThreshold)
@@ -120,6 +122,9 @@ static void addCandidate(std::vector<Candidate> &candidates,
 			      static_cast<float>(boxWidth * boxHeight)});
 }
 
+
+/* YOLO outputs can have different shapes. So this function decodes the output
+into a list of Detection objects, applying the confidence threshold and NMS. */
 static std::vector<Detection> decodeYolov8(const ncnn::Mat &output,
 					   const Config &config,
 					   int xPad,

@@ -111,6 +111,9 @@ int SettingReader<struct roadFollowingCfg>::read(const libconfig::Setting &set,
 	str = "yoloNmsThreshold";
 	CFG_CHECK(ConfigReader::getField(set, str, v.yoloNmsThreshold));
 
+	str = "STREAM_YOLO_DETECTIONS";
+	CFG_CHECK(ConfigReader::getField(set, str, v.streamYoloDetections));
+
 	return 0;
 }
 } // namespace cfgreader
@@ -120,6 +123,7 @@ static void do_step(const struct vipc_frame *frame,
 		    bool &is_road_detected,
 		    cv::ColorConversionCodes colorConversionCodes,
 		    yolo_detector::Detector &yoloDetector,
+		    bool streamYoloDetections,
 		    YoloDetections &yolo_detections,
 		    bool &yolo_detections_ready)
 {
@@ -195,16 +199,18 @@ static void do_step(const struct vipc_frame *frame,
 			yoloDetector.detect(frame_ref);
 		ULOGI("YOLO detections: %zu", detections.size());
 		for (const auto &detection : detections) {
-			YoloDetection *yolo_detection =
-				yolo_detections.add_detections();
+			if (streamYoloDetections) {
+				YoloDetection *yolo_detection =
+					yolo_detections.add_detections();
 
-			yolo_detection->set_class_id(detection.classId);
-			yolo_detection->set_confidence(detection.confidence);
-			yolo_detection->set_x(detection.box.x);
-			yolo_detection->set_y(detection.box.y);
-			yolo_detection->set_width(detection.box.width);
-			yolo_detection->set_height(detection.box.height);
-			yolo_detections_ready = true;
+				yolo_detection->set_class_id(detection.classId);
+				yolo_detection->set_confidence(detection.confidence);
+				yolo_detection->set_x(detection.box.x);
+				yolo_detection->set_y(detection.box.y);
+				yolo_detection->set_width(detection.box.width);
+				yolo_detection->set_height(detection.box.height);
+				yolo_detections_ready = true;
+			}
 
 			ULOGI("YOLO class=%d confidence=%.3f box=[x=%d,y=%d,w=%d,h=%d]",
 			      detection.classId,
@@ -310,10 +316,13 @@ void Processing::threadEntry()
 			mIsRoadDetected,
 			mColorConversionCodes,
 			mYoloDetector,
+			mRoadFollowingCfg.streamYoloDetections,
 			yolo_detections,
 			yolo_detections_ready);
 		mMutex.lock();
-		if (yolo_detections_ready)
+
+		if (mRoadFollowingCfg.streamYoloDetections &&
+		    yolo_detections_ready)
 			this->yoloDetections(yolo_detections);
 
 		mTelemetryConsumer->getSample(nullptr,

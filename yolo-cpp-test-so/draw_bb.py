@@ -135,7 +135,7 @@ class SimpleOlympeStream:
 
         if cv2_frame is not None:
             frame_height, frame_width = cv2_frame.shape[:2]
-            print(f"Received frame size: {frame_width}x{frame_height}")
+            # print(f"Received frame size: {frame_width}x{frame_height}")
         
             # Draw the bounding box if available
             with global_bb_lock:
@@ -147,7 +147,7 @@ class SimpleOlympeStream:
                             self._scale_x(bb.width, frame_width),
                             self._scale_y(bb.height, frame_height),
                         )
-                        print(f"Drawing bounding box: x={x}, y={y}, w={w}, h={h}")
+                        # print(f"Drawing bounding box: x={x}, y={y}, w={w}, h={h}")
                         cv2.rectangle(
                             cv2_frame,
                             (x, y),
@@ -300,29 +300,7 @@ def listen_yolo_events(drone):
                 
                 detections = []
                 for event in expectation.matched_events():
-                    print(f"Received yolo_detections event: {event}")
-                    # print(f"class id : {event.args['class_id']}")
-                    # print(f"type of event: {type(event)}")
-                    # class_id = event.args['class_id']
-                    # confidence = event.args['confidence']
-                    # x = event.args['x']
-                    # y = event.args['y']
-                    # width = event.args['width']
-                    # height = event.args['height']
-                    # # acquire lock to update global_bb safely
-                    # with global_bb_lock:
-                    #     global global_bb
-                    #     if global_bb is None:
-                    #         global_bb = BoundingBox(class_id, confidence, x, y, width, height)
-                    #         print(f"Initialized global bounding box: {global_bb.__dict__}")
-                    #     else:
-                    #         global_bb.class_id = class_id
-                    #         global_bb.confidence = confidence
-                    #         global_bb.x = x
-                    #         global_bb.y = y
-                    #         global_bb.width = width
-                    #         global_bb.height = height
-                    #         print(f"Updated global bounding box: {global_bb.__dict__}")
+                    # print(f"Received yolo_detections event: {event}")
                     #loop through detections
                     for detection in event.args["detections"]:
                         class_id = detection['class_id']
@@ -333,7 +311,7 @@ def listen_yolo_events(drone):
                         height = detection['height']
 
                         detections.append(BoundingBox(class_id, confidence, x, y, width, height))
-                        print(f"Received detection: class_id={class_id}, confidence={confidence}, x={x}, y={y}, width={width}, height={height}")
+                        # print(f"Received detection: class_id={class_id}, confidence={confidence}, x={x}, y={y}, width={width}, height={height}")
 
                 # acquire lock to update global_bb safely
                 with global_bb_lock:
