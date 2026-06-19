@@ -1,0 +1,58 @@
+api_version: 3
+kind: Mission
+metadata:
+  uid: com.parrot.missions.samples.yolo
+  name: yolo_test
+  description: Run the CV service without commanding drone movement.
+  version: "0.0.0"
+targets:
+  # Important: Make sure you understand the behaviour of this mission before run it on a physical drone.
+  Anafi Ai:
+  # Anafi Ai Simulator:
+  # Important: Make sure you understand the behaviour of this mission before run it on a physical drone.
+  # Anafi UKR:
+  # Anafi UKR Simulator:
+fsup:
+  lang: "python"
+  depends:
+    - msghub::mission_ui
+    - msghub::cv_road
+msghub:
+  - name: cv_road
+    include_path: road_runner/cv_road
+  - name: mission_ui
+    include_path: parrot
+deps:
+  ncnn:
+    type: alchemy
+  yolo_detector:
+    lang: c++
+    headers: include
+    depends:
+      - libulog
+      - ncnn
+      - opencv4
+services:
+  cv_road:
+    lang: c++
+    depends:
+      - libconfigreader
+      - libfutils
+      - libmsghub
+      - libputils
+      - libtelemetry
+      - libvideo-ipc
+      - libvideo-ipc-client-config
+      - msghub::cv_road
+      - opencv4
+      - protobuf
+      - yolo_detector
+  position_estimation:
+    lang: python
+    depends:
+      - libmsghub
+      - msghub::mission_ui
+      - msghub::cv_road
+# pip: 
+#   requirements:
+#     - path: "./requirements.txt"

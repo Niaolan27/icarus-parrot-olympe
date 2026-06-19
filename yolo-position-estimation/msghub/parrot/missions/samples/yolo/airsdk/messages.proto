@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package parrot.missions.samples.yolo.airsdk.messages;
+
+import 'parrot/protobuf/extensions.proto';
+
+option java_package = "com.parrot.drone.missions.samples.yolo.airsdk";
+option java_outer_classname = "Yolo";
+
+option (olympe_package) = "parrot.missions.samples.yolo";
+
+message Command {
+    oneof id {
+        bool enable_cv = 1;
+    }
+}
+
+message YoloDetection {
+    int32 class_id = 1;
+    float confidence = 2;
+    int32 x = 3;
+    int32 y = 4;
+    int32 width = 5;
+    int32 height = 6;
+}
+
+message YoloDetections {
+    repeated YoloDetection detections = 1;
+}
+
+message Event {
+    reserved 1;
+    reserved "yolo_inference_done";
+
+    oneof id {
+        YoloDetection yolo_detection = 2;
+        YoloDetections yolo_detections = 3;
+    }
+}

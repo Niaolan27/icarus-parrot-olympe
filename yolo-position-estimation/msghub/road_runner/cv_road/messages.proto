@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package road_runner.service.cv_road.messages;
+
+message Command {
+    oneof id {
+        bool enable_cv = 1;
+    }
+}
+
+message YoloDetection {
+    int32 class_id = 1;
+    float confidence = 2;
+    int32 x = 3;
+    int32 y = 4;
+    int32 width = 5;
+    int32 height = 6;
+}
+
+message YoloDetections {
+    repeated YoloDetection detections = 1;
+}
+
+message PositionEstimationTrigger {
+    int64 timestamp_ms = 1;
+    int32 frame_width = 2;
+    int32 frame_height = 3;
+    repeated YoloDetection detections = 4;
+}
+
+message Event {
+    reserved 2;
+    reserved "yolo_inference_done";
+
+    oneof id {
+        google.protobuf.Empty road_lost = 1;
+        YoloDetection yolo_detection = 3;
+        YoloDetections yolo_detections = 4;
+        PositionEstimationTrigger position_estimation_trigger = 5;
+    }
+}
