@@ -8,8 +8,15 @@ import olympe
 import time
 from pathlib import Path
 
+from olympe.messages.ardrone3.Piloting import TakeOff, Landing, moveBy, PCMD
+from olympe.messages.ardrone3.PilotingEvent import moveByEnd
+from olympe.messages.ardrone3.PilotingState import AltitudeChanged, FlyingStateChanged
+from olympe.messages.gimbal import set_target
+
+
 # Default direct Wi-Fi IP address for the ANAFI Ai
 DRONE_IP = "192.168.42.1"
+# DRONE_IP = "10.202.0.1"
 
 global_bb = None  # Global variable to hold the latest bounding box data
 global_bb_lock = threading.Lock()  # Lock for thread-safe access to global_bb
@@ -22,6 +29,8 @@ DEFAULT_MISSION_PATH = (
 TIMEOUT = 0.5  # Timeout in seconds for waiting for yolo_detection events
 BBOX_SOURCE_WIDTH = 1280
 BBOX_SOURCE_HEIGHT = 720
+CAMERA_DOWN_PITCH_DEGREES = -80.0
+CLIMB_DISTANCE_METERS = 5.0
 
 YOLO_CLASS_NAMES = {
     0: "person",
@@ -113,9 +122,7 @@ class SimpleOlympeStream:
         self._printed_frame_format = False
 
     def start(self):
-        # 1. Connect to the drone
-        print("Connecting to ANAFI Ai...")
-        assert self.drone.connect(retry=3), "Connection failed. Check your Wi-Fi link."
+        
 
         # 2. Command the drone to open its video pipeline
         # Olympe's Pdraw API uses 'raw_cb' to deliver fully decoded frames.
@@ -234,6 +241,50 @@ class BoundingBox:
         self.width = width
         self.height = height
 
+def point_camera_down(drone):
+    result = drone(
+        set_target(
+            gimbal_id=0,
+            control_mode="position",
+            yaw_frame_of_reference="none",
+            yaw=0.0,
+            pitch_frame_of_reference="absolute",
+            pitch=CAMERA_DOWN_PITCH_DEGREES,
+            roll_frame_of_reference="none",
+            roll=0.0,
+        )
+    ).wait(_timeout=5)
+
+    if not result.success():
+        print(result.explain())
+        raise RuntimeError("Failed to point camera downward.")
+
+def run_move_by(drone, label, dx, dy, dz, dpsi, timeout=60):
+    print(f"Starting {label}: dx={dx}, dy={dy}, dz={dz}, dpsi={dpsi}")
+    result = drone(
+        moveBy(dx, dy, dz, dpsi, _no_expect=True)
+        >> moveByEnd(
+            dX=dx,
+            dY=dy,
+            dZ=dz,
+            dPsi=dpsi,
+            _policy="wait",
+            _float_tol=(0.2, 0.2),
+            _timeout=timeout,
+        )
+    ).wait(_timeout=timeout + 5)
+
+    print(f"{label} success:", result.success())
+    if result.success():
+        for event in result.matched_events():
+            print(f"{label} moveByEnd:", event.args)
+        return True
+
+    print(result.explain())
+    print("Flying state:", drone.get_state(FlyingStateChanged))
+    print("Altitude:", drone.get_state(AltitudeChanged))
+    return False
+
 def _event_payload(event):
     args = getattr(event, "args", None)
     if callable(args):
@@ -322,18 +373,47 @@ def listen_yolo_events(drone):
         except KeyboardInterrupt:
             print("Stopping listener.")
 
-
 def main():
     # initialize the drone
     drone = olympe.Drone(DRONE_IP)
+
+    # 1. Connect to the drone
+    print("Connecting to ANAFI Ai...")
+    assert drone.connect(retry=3), "Connection failed. Check your Wi-Fi link."
+
+    print(f"Pointing camera to {CAMERA_DOWN_PITCH_DEGREES} degrees pitch...")
+    point_camera_down(drone)
 
     # initialize the stream
     streamer = SimpleOlympeStream(drone)
     streamer.start()
 
+
     # initialize thread for listening to yolo_detection events
     thread = threading.Thread(target=listen_yolo_events, args=(drone,), daemon=True)
     thread.start()
+
+    # # Series of flight commands 
+    # takeoff = drone(
+    #     TakeOff()
+    #     >> FlyingStateChanged(state="hovering", _timeout=30)
+    # ).wait(_timeout=35)
+    # print("Takeoff success:", takeoff.success())
+    # if not takeoff.success():
+    #     print(takeoff.explain())
+    #     return
+
+    # # Move up by 5 meters. moveBy dZ is along the down axis, so up is negative.
+    # run_move_by(drone, "Move up", 0.0, 0.0, -1.0, 0.0)
+
+    # # Move forward by 2 meters
+    # run_move_by(drone, "Move forward", 5.0, 0.0, 0.0, 0.0)
+
+    # # Land
+    # drone(
+    #     Landing()
+    #     >> FlyingStateChanged(state="landed", _timeout=10)
+    # ).wait()
 
     try:
         # Keep the main execution thread alive while the stream thread runs
@@ -342,6 +422,8 @@ def main():
     except KeyboardInterrupt:
         streamer.stop()
         print("Stream closed cleanly.")
+        
+    
 
 if __name__ == "__main__":
     main()
