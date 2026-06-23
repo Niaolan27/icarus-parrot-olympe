@@ -9,12 +9,15 @@ import ulog
 import libpomp
 import msghub
 from road_runner.cv_road import messages_msghub
+from road_runner.position_estimation import messages_msghub as pos_messages_msghub
+from road_runner.position_estimation import messages_pb2 as pos_messages_pb2
 
 from .PixelLocationFinder import PixelLocationFinder
 
 # This is limited to 15 characters
 PROCESS_NAME = b"pos_estimate"
 CV_ROAD_SERVICE_ADDR = "unix:/tmp/road-runner-cv-road-service"
+POSITION_ESTIMATION_SERVICE_ADDR = "unix:/tmp/road-runner-position-estimation-service"
 
 DEFAULT_FRAME_WIDTH = 4608
 DEFAULT_FRAME_HEIGHT = 3456
@@ -28,9 +31,10 @@ LONGITUDE_DEGREES = -0.70
 
 
 class PositionEstimationEventHandler(messages_msghub.EventHandler):
-    def __init__(self, logger):
+    def __init__(self, logger, result_sender):
         super().__init__()
         self.logger = logger
+        self.result_sender = result_sender
         self.location_finder = None
         self.frame_width = None
         self.frame_height = None
@@ -81,6 +85,8 @@ class PositionEstimationEventHandler(messages_msghub.EventHandler):
             len(msg.detections),
         )
 
+        results = pos_messages_pb2.PositionEstimationResults()
+
         for detection in msg.detections:
             x_center = detection.x + detection.width / 2.0
             y_center = detection.y + detection.height / 2.0
@@ -115,13 +121,34 @@ class PositionEstimationEventHandler(messages_msghub.EventHandler):
 
             self.logger.info(f"Position estimation result: forward={forward:.2f} m, side={side:.2f} m, north={north:.6f}, east={east:.6f}, lat={lat:.6f}, lon={lon:.6f}")   
 
+            result = results.results.add()
+            result.timestamp_ms = msg.timestamp_ms
+            result.class_id = detection.class_id
+            result.confidence = detection.confidence
+            result.x_center = x_center
+            result.y_center = y_center
+            result.forward_m = forward
+            result.side_m = side
+            result.north_m = north
+            result.east_m = east
+            result.latitude = lat
+            result.longitude = lon
+
+        self.result_sender.position_estimation_results(results)
+        self.logger.info(
+            "Published %d position estimation results",
+            len(results.results),
+        )
+
 
 class CvRoadEventClient:
     def __init__(self, logger):
         self.logger = logger
         self.loop = None
         self.msghub = None
-        self.channel = None
+        self.cv_road_channel = None
+        self.result_channel = None
+        self.result_sender = None
         self.handler = None
         self.thread = None
         self.stop_requested = threading.Event()
@@ -129,8 +156,16 @@ class CvRoadEventClient:
     def start(self):
         self.loop = libpomp.pomp_loop_new()
         self.msghub = msghub.MessageHub(self.loop)
-        self.channel = self.msghub.start_client_channel(CV_ROAD_SERVICE_ADDR)
-        self.handler = PositionEstimationEventHandler(self.logger)
+        self.cv_road_channel = self.msghub.start_client_channel(CV_ROAD_SERVICE_ADDR)
+        self.result_channel = self.msghub.start_server_channel(
+            POSITION_ESTIMATION_SERVICE_ADDR
+        )
+        self.result_sender = pos_messages_msghub.EventSender()
+        self.msghub.attach_message_sender(self.result_sender, self.result_channel)
+        self.handler = PositionEstimationEventHandler(
+            self.logger,
+            self.result_sender,
+        )
         self.msghub.attach_message_handler(self.handler)
 
         self.thread = threading.Thread(
@@ -155,9 +190,17 @@ class CvRoadEventClient:
             self.msghub.detach_message_handler(self.handler)
             self.handler = None
 
-        if self.msghub is not None and self.channel is not None:
-            self.msghub.stop_channel(self.channel)
-            self.channel = None
+        if self.msghub is not None and self.result_sender is not None:
+            self.msghub.detach_message_sender(self.result_sender)
+            self.result_sender = None
+
+        if self.msghub is not None and self.result_channel is not None:
+            self.msghub.stop_channel(self.result_channel)
+            self.result_channel = None
+
+        if self.msghub is not None and self.cv_road_channel is not None:
+            self.msghub.stop_channel(self.cv_road_channel)
+            self.cv_road_channel = None
 
         self.msghub = None
 

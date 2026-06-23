@@ -28,6 +28,24 @@ message YoloDetections {
     repeated YoloDetection detections = 1;
 }
 
+message PositionEstimationResult {
+    int64 timestamp_ms = 1;
+    int32 class_id = 2;
+    float confidence = 3;
+    float x_center = 4;
+    float y_center = 5;
+    double forward_m = 6;
+    double side_m = 7;
+    double north_m = 8;
+    double east_m = 9;
+    double latitude = 10;
+    double longitude = 11;
+}
+
+message PositionEstimationResults {
+    repeated PositionEstimationResult results = 1;
+}
+
 message Event {
     reserved 1;
     reserved "yolo_inference_done";
@@ -35,5 +53,6 @@ message Event {
     oneof id {
         YoloDetection yolo_detection = 2;
         YoloDetections yolo_detections = 3;
+        PositionEstimationResults position_estimation_results = 4;
     }
 }

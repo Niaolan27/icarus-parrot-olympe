@@ -15,8 +15,8 @@ from olympe.messages.gimbal import set_target
 
 
 # Default direct Wi-Fi IP address for the ANAFI Ai
-DRONE_IP = "192.168.42.1"
-# DRONE_IP = "10.202.0.1"
+# DRONE_IP = "192.168.42.1"
+DRONE_IP = "10.202.0.1"
 
 global_bb = None  # Global variable to hold the latest bounding box data
 global_bb_lock = threading.Lock()  # Lock for thread-safe access to global_bb
@@ -29,7 +29,7 @@ DEFAULT_MISSION_PATH = (
 TIMEOUT = 0.5  # Timeout in seconds for waiting for yolo_detection events
 BBOX_SOURCE_WIDTH = 1280
 BBOX_SOURCE_HEIGHT = 720
-CAMERA_DOWN_PITCH_DEGREES = -80.0
+CAMERA_DOWN_PITCH_DEGREES = 0
 CLIMB_DISTANCE_METERS = 5.0
 
 YOLO_CLASS_NAMES = {
@@ -315,6 +315,23 @@ def _format_detection(detection):
         f"w={_field(detection, 'width')}, h={_field(detection, 'height')})"
     )
 
+def _format_position_result(result):
+    class_id = _field(result, "class_id")
+    class_name = YOLO_CLASS_NAMES.get(class_id, "Unknown")
+    return (
+        f"timestamp_ms={_field(result, 'timestamp_ms')} "
+        f"class={class_name}({class_id}) "
+        f"confidence={_field(result, 'confidence'):.3f} "
+        f"center=(x={_field(result, 'x_center'):.1f}, "
+        f"y={_field(result, 'y_center'):.1f}) "
+        f"relative=(forward={_field(result, 'forward_m'):.2f} m, "
+        f"side={_field(result, 'side_m'):.2f} m) "
+        f"ne=(north={_field(result, 'north_m'):.2f} m, "
+        f"east={_field(result, 'east_m'):.2f} m) "
+        f"latlon=({_field(result, 'latitude'):.6f}, "
+        f"{_field(result, 'longitude'):.6f})"
+    )
+
 def listen_yolo_events(drone):
     global global_bb
 
@@ -328,10 +345,11 @@ def listen_yolo_events(drone):
     print(f"Using mission archive: {mission_path}")
     with drone.mission.from_path(str(mission_path)):
         from olympe.airsdk.messages.parrot.missions.samples.yolo.Event import (
+            PositionEstimationResults,
             YoloDetections,
         )
 
-        print("Waiting for yolo_detection events. Press Ctrl-C to stop.")
+        print("Waiting for YOLO and position estimation events. Press Ctrl-C to stop.")
         try:
             while drone.connected:
                 
@@ -344,29 +362,43 @@ def listen_yolo_events(drone):
                     with global_bb_lock:
                         global_bb = []  # Clear the bounding boxes if no event is received
                     print("No yolo_detections event received before timeout.")
+                else:
+                    print("Received yolo_detections event.")
+                    detections = []
+                    for event in expectation.matched_events():
+                        # print(f"Received yolo_detections event: {event}")
+                        #loop through detections
+                        for detection in event.args["detections"]:
+                            class_id = detection['class_id']
+                            confidence = detection['confidence']
+                            x = detection['x']
+                            y = detection['y']
+                            width = detection['width']
+                            height = detection['height']
+
+                            detections.append(BoundingBox(class_id, confidence, x, y, width, height))
+                            # print(f"Received detection: class_id={class_id}, confidence={confidence}, x={x}, y={y}, width={width}, height={height}")
+
+                    # acquire lock to update global_bb safely
+                    with global_bb_lock:
+                        global_bb = detections 
+
+                position_expectation = drone(
+                    PositionEstimationResults(_policy="wait")
+                ).wait(_timeout=10)
+
+                if not position_expectation.success():
+                    print("No position_estimation_results event received before timeout.")
                     continue
 
+                print("Received position_estimation_results event.")
 
-                 # TODO - Add logic to extract bounding box data from the event and update global_bb
-                
-                detections = []
-                for event in expectation.matched_events():
-                    # print(f"Received yolo_detections event: {event}")
-                    #loop through detections
-                    for detection in event.args["detections"]:
-                        class_id = detection['class_id']
-                        confidence = detection['confidence']
-                        x = detection['x']
-                        y = detection['y']
-                        width = detection['width']
-                        height = detection['height']
-
-                        detections.append(BoundingBox(class_id, confidence, x, y, width, height))
-                        # print(f"Received detection: class_id={class_id}, confidence={confidence}, x={x}, y={y}, width={width}, height={height}")
-
-                # acquire lock to update global_bb safely
-                with global_bb_lock:
-                    global_bb = detections 
+                for event in position_expectation.matched_events():
+                    for result in event.args["results"]:
+                        print(
+                            "Received position_estimation_results event: "
+                            f"{_format_position_result(result)}"
+                        )
                 
                
 

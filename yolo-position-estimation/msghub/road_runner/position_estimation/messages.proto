@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package road_runner.service.position_estimation.messages;
+
+message PositionEstimationResult {
+    int64 timestamp_ms = 1;
+    int32 class_id = 2;
+    float confidence = 3;
+    float x_center = 4;
+    float y_center = 5;
+    double forward_m = 6;
+    double side_m = 7;
+    double north_m = 8;
+    double east_m = 9;
+    double latitude = 10;
+    double longitude = 11;
+}
+
+message PositionEstimationResults {
+    repeated PositionEstimationResult results = 1;
+}
+
+message Event {
+    oneof id {
+        PositionEstimationResults position_estimation_results = 1;
+    }
+}

@@ -60,6 +60,7 @@ from fsup.missions.default.mission import TRANSITIONS as DEF_TRANSITIONS
 
 # AirSDK Service messages (cv_road)
 import road_runner.cv_road.messages_pb2 as rr_service_msgs
+import road_runner.position_estimation.messages_pb2 as pos_service_msgs
 
 # AirSDK/Olympe-facing mission messages
 import parrot.missions.samples.yolo.airsdk.messages_pb2 as yolo_msgs
@@ -68,6 +69,9 @@ import parrot.missions.samples.yolo.airsdk.messages_pb2 as yolo_msgs
 # Messages channel
 
 _CV_ROAD_SERVICE_CHANNEL = "unix:/tmp/road-runner-cv-road-service"
+_POSITION_ESTIMATION_SERVICE_CHANNEL = (
+    "unix:/tmp/road-runner-position-estimation-service"
+)
 
 ###################################################
 # Mission
@@ -84,6 +88,9 @@ class Mission(AbstractMission):
         self.airsdk_service_cv_road_messages_channel = None
         self.airsdk_service_cv_road_handler_messages = None
         self.airsdk_service_cv_road_messages_observer = None
+        self.position_estimation_messages_channel = None
+        self.position_estimation_handler_messages = None
+        self.position_estimation_messages_observer = None
 
     def on_load(self):
         # Olympe-facing mission messages
@@ -95,11 +102,19 @@ class Mission(AbstractMission):
                 _CV_ROAD_SERVICE_CHANNEL
             )
         )
+        self.position_estimation_messages_channel = (
+            self.mc.start_client_channel(
+                _POSITION_ESTIMATION_SERVICE_CHANNEL
+            )
+        )
 
     def on_unload(self):
         # AIRSDK SERVICE (cv_road) <---> FSUP
         self.mc.stop_channel(self.airsdk_service_cv_road_messages_channel)
         self.airsdk_service_cv_road_messages_channel = None
+
+        self.mc.stop_channel(self.position_estimation_messages_channel)
+        self.position_estimation_messages_channel = None
 
         # Olympe-facing mission messages
         self.ext_ui_msgs = None
@@ -127,6 +142,25 @@ class Mission(AbstractMission):
             )
         )
 
+        self.position_estimation_handler_messages = (
+            self.mc.attach_client_service_pair(
+                self.position_estimation_messages_channel,
+                pos_service_msgs,
+                forward_events=True,
+            )
+        )
+
+        self.position_estimation_messages_observer = (
+            self.position_estimation_handler_messages.evt.observe(
+                {
+                    msg_id(
+                        pos_service_msgs.Event,
+                        "position_estimation_results",
+                    ): self._relay_position_estimation_results,
+                }
+            )
+        )
+
         self._send_cv_road_enable(True)
 
     def on_deactivate(self):
@@ -138,6 +172,12 @@ class Mission(AbstractMission):
 
         self.mc.detach_client_service_pair(self.airsdk_service_cv_road_handler_messages)  # noqa: E501
         self.airsdk_service_cv_road_handler_messages = None
+
+        self.position_estimation_messages_observer.unobserve()
+        self.position_estimation_messages_observer = None
+
+        self.mc.detach_client_service_pair(self.position_estimation_handler_messages)
+        self.position_estimation_handler_messages = None
 
         # Olympe-facing mission messages
         self.ext_ui_msgs.detach()
@@ -182,3 +222,33 @@ class Mission(AbstractMission):
         # )
 
         self.ext_ui_msgs.evt.sender.yolo_detections(detections=detections)
+
+    def _relay_position_estimation_results(self, *args):
+        msg = args[-1]
+        service_results = msg.position_estimation_results
+        results = []
+
+        for service_result in service_results.results:
+            results.append(
+                {
+                    "timestamp_ms": service_result.timestamp_ms,
+                    "class_id": service_result.class_id,
+                    "confidence": service_result.confidence,
+                    "x_center": service_result.x_center,
+                    "y_center": service_result.y_center,
+                    "forward_m": service_result.forward_m,
+                    "side_m": service_result.side_m,
+                    "north_m": service_result.north_m,
+                    "east_m": service_result.east_m,
+                    "latitude": service_result.latitude,
+                    "longitude": service_result.longitude,
+                }
+            )
+
+        self.ext_ui_msgs.evt.sender.position_estimation_results(
+            results=results,
+        )
+
+        self.log.info(
+            "Relaying position_estimation_results event: %d results",
+            len(results))
