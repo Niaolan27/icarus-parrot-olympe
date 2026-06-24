@@ -8,7 +8,7 @@ metadata:
 targets:
   # Important: Make sure you understand the behaviour of this mission before run it on a physical drone.
   Anafi Ai:
-  Anafi Ai Simulator:
+  # Anafi Ai Simulator:
   # Important: Make sure you understand the behaviour of this mission before run it on a physical drone.
   # Anafi UKR:
   # Anafi UKR Simulator:
@@ -57,6 +57,10 @@ services:
       - msghub::mission_ui
       - msghub::cv_road
       - msghub::position_estimation
+signatures:
+   - name: signature.ecdsa
+     type: local
+     path: /home/jason/fm-provider-private-key.pem
 # pip: 
 #   requirements:
 #     - path: "./requirements.txt"

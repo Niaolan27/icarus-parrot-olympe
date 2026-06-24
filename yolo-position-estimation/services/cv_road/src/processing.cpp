@@ -131,7 +131,7 @@ static void do_step(const struct vipc_frame *frame,
 		    cv::ColorConversionCodes colorConversionCodes,
 		    yolo_detector::Detector &yoloDetector,
 		    bool streamYoloDetections,
-		    int positionEstimationTriggerPeriodSeconds,
+		    float positionEstimationTriggerPeriodSeconds,
 		    YoloDetections &yolo_detections,
 		    bool &yolo_detections_ready,
 		    PositionEstimationTrigger &position_trigger,
@@ -212,7 +212,7 @@ static void do_step(const struct vipc_frame *frame,
 	const bool should_trigger_position_estimation =
 		positionEstimationTriggerPeriodSeconds > 0 &&
 		now - last_position_trigger_time >=
-			std::chrono::seconds(
+			std::chrono::duration<float>(
 				positionEstimationTriggerPeriodSeconds);
 
 	if (should_trigger_position_estimation) {

@@ -19,11 +19,14 @@ PROCESS_NAME = b"pos_estimate"
 CV_ROAD_SERVICE_ADDR = "unix:/tmp/road-runner-cv-road-service"
 POSITION_ESTIMATION_SERVICE_ADDR = "unix:/tmp/road-runner-position-estimation-service"
 
-DEFAULT_FRAME_WIDTH = 4608
-DEFAULT_FRAME_HEIGHT = 3456
-FOV_DEGREES = 75.5
+# TODO Verify the values for the camera and drone parameters
 
-CAMERA_TILT_DEGREES = -90 + 28.3
+
+DEFAULT_FRAME_WIDTH = 1080
+DEFAULT_FRAME_HEIGHT = 1920
+FOV_DEGREES = 68.0
+
+CAMERA_TILT_DEGREES = -80.0
 AGL_ALTITUDE_METERS = 120
 HEADING_DEGREES = 90
 LATITUDE_DEGREES = 44.68

@@ -78,7 +78,7 @@ struct roadFollowingCfg {
 	float yoloConfidenceThreshold;
 	float yoloNmsThreshold;
 	bool streamYoloDetections;
-	int positionEstimationTriggerPeriodSeconds;
+	float positionEstimationTriggerPeriodSeconds;
 };
 
 /* Values to send to RoadFollowing guidance mode */

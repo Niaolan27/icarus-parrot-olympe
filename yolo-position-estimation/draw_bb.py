@@ -1,5 +1,6 @@
 import os
 import threading
+import argparse
 
 os.environ.setdefault("PYOPENGL_PLATFORM", "glx")
 
@@ -8,15 +9,18 @@ import olympe
 import time
 from pathlib import Path
 
-from olympe.messages.ardrone3.Piloting import TakeOff, Landing, moveBy, PCMD
+from olympe.messages.ardrone3.Piloting import TakeOff, Landing, moveBy, NavigateHome
 from olympe.messages.ardrone3.PilotingEvent import moveByEnd
-from olympe.messages.ardrone3.PilotingState import AltitudeChanged, FlyingStateChanged
+from olympe.messages.ardrone3.PilotingState import AltitudeChanged, FlyingStateChanged, NavigateHomeStateChanged
 from olympe.messages.gimbal import set_target
+from olympe.messages.ardrone3.PilotingState import AlertStateChanged
+from olympe.messages.alarms import takeoff_checklist
+from olympe.messages.alarms import alarms as alarms_anafi
+from olympe.enums.alarms import state as AlarmState
 
 
 # Default direct Wi-Fi IP address for the ANAFI Ai
-# DRONE_IP = "192.168.42.1"
-DRONE_IP = "10.202.0.1"
+DEFAULT_DRONE_IP = "192.168.42.1"
 
 global_bb = None  # Global variable to hold the latest bounding box data
 global_bb_lock = threading.Lock()  # Lock for thread-safe access to global_bb
@@ -29,7 +33,7 @@ DEFAULT_MISSION_PATH = (
 TIMEOUT = 0.5  # Timeout in seconds for waiting for yolo_detection events
 BBOX_SOURCE_WIDTH = 1280
 BBOX_SOURCE_HEIGHT = 720
-CAMERA_DOWN_PITCH_DEGREES = 0
+CAMERA_DOWN_PITCH_DEGREES = -80.0
 CLIMB_DISTANCE_METERS = 5.0
 
 YOLO_CLASS_NAMES = {
@@ -332,128 +336,227 @@ def _format_position_result(result):
         f"{_field(result, 'longitude'):.6f})"
     )
 
-def listen_yolo_events(drone):
-    global global_bb
-
-    mission_path = Path(DEFAULT_MISSION_PATH).expanduser().resolve()
+def _mission_path(path):
+    mission_path = Path(path).expanduser().resolve()
     if not mission_path.exists():
         raise FileNotFoundError(
             f"Mission archive not found: {mission_path}\n"
             "Build the mission first with `airsdk build`, or pass --mission-path."
         )
-    
-    print(f"Using mission archive: {mission_path}")
-    with drone.mission.from_path(str(mission_path)):
-        from olympe.airsdk.messages.parrot.missions.samples.yolo.Event import (
-            PositionEstimationResults,
-            YoloDetections,
-        )
+    return mission_path
 
-        print("Waiting for YOLO and position estimation events. Press Ctrl-C to stop.")
-        try:
-            while drone.connected:
+
+def _connection_error_message(drone_ip):
+    return (
+        f"Connection failed: could not reach drone at {drone_ip}.\n"
+        "Check that this computer is connected to the drone Wi-Fi, the drone is "
+        "powered on, and no simulator/physical-drone IP mismatch is being used.\n"
+        "Common addresses: 192.168.42.1 for direct drone Wi-Fi, 10.202.0.1 for "
+        "some bridged/simulator setups.\n"
+        f"Retry with: python {Path(__file__).name} --drone-ip <address>"
+    )
+
+
+def listen_yolo_events(drone):
+    global global_bb
+
+    from olympe.airsdk.messages.parrot.missions.samples.yolo.Event import (
+        YoloDetections,
+    )
+
+    print("Waiting for YOLO detection events. Press Ctrl-C to stop.")
+    try:
+        while drone.connected:
+            expectation = drone(
+                YoloDetections(_policy="wait")
+            ).wait(_timeout=TIMEOUT)
+
+            if not expectation.success():
+                with global_bb_lock:
+                    global_bb = []  # Clear the bounding boxes if no event is received
+                print("No yolo_detections event received before timeout.")
+                continue
+
+            print("Received yolo_detections event.")
+            detections = []
+            for event in expectation.matched_events():
+                # print(f"Received yolo_detections event: {event}")
+                #loop through detections
+                for detection in event.args["detections"]:
+                    class_id = detection['class_id']
+                    confidence = detection['confidence']
+                    x = detection['x']
+                    y = detection['y']
+                    width = detection['width']
+                    height = detection['height']
+
+                    detections.append(BoundingBox(class_id, confidence, x, y, width, height))
+                    # print(f"Received detection: class_id={class_id}, confidence={confidence}, x={x}, y={y}, width={width}, height={height}")
+
+            # acquire lock to update global_bb safely
+            with global_bb_lock:
+                global_bb = detections
+
+    except KeyboardInterrupt:
+        print("Stopping YOLO listener.")
+
+
+def listen_position_estimation_events(drone):
+    from olympe.airsdk.messages.parrot.missions.samples.yolo.Event import (
+        PositionEstimationResults,
+    )
+
+    print("Waiting for position estimation events. Press Ctrl-C to stop.")
+    try:
+        while drone.connected:
+            expectation = drone(
+                PositionEstimationResults(_policy="wait")
+            ).wait(_timeout=TIMEOUT)
+
+            if not expectation.success():
+                continue
+
+            for event in expectation.matched_events():
+                for result in event.args["results"]:
+                    print(
+                        "Received position_estimation_results event: "
+                        f"{_format_position_result(result)}"
+                    )
                 
-                expectation = drone(
-                    YoloDetections(_policy="wait")
-                ).wait(_timeout=TIMEOUT)
+    except KeyboardInterrupt:
+        print("Stopping position estimation listener.")
 
-                if not expectation.success():
-                    
-                    with global_bb_lock:
-                        global_bb = []  # Clear the bounding boxes if no event is received
-                    print("No yolo_detections event received before timeout.")
-                else:
-                    print("Received yolo_detections event.")
-                    detections = []
-                    for event in expectation.matched_events():
-                        # print(f"Received yolo_detections event: {event}")
-                        #loop through detections
-                        for detection in event.args["detections"]:
-                            class_id = detection['class_id']
-                            confidence = detection['confidence']
-                            x = detection['x']
-                            y = detection['y']
-                            width = detection['width']
-                            height = detection['height']
-
-                            detections.append(BoundingBox(class_id, confidence, x, y, width, height))
-                            # print(f"Received detection: class_id={class_id}, confidence={confidence}, x={x}, y={y}, width={width}, height={height}")
-
-                    # acquire lock to update global_bb safely
-                    with global_bb_lock:
-                        global_bb = detections 
-
-                position_expectation = drone(
-                    PositionEstimationResults(_policy="wait")
-                ).wait(_timeout=10)
-
-                if not position_expectation.success():
-                    print("No position_estimation_results event received before timeout.")
-                    continue
-
-                print("Received position_estimation_results event.")
-
-                for event in position_expectation.matched_events():
-                    for result in event.args["results"]:
-                        print(
-                            "Received position_estimation_results event: "
-                            f"{_format_position_result(result)}"
-                        )
-                
-               
-
-        except KeyboardInterrupt:
-            print("Stopping listener.")
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Stream ANAFI video, draw YOLO bounding boxes, and print position events."
+    )
+    parser.add_argument(
+        "--drone-ip",
+        default=DEFAULT_DRONE_IP,
+        help=f"Drone IP address. Default: {DEFAULT_DRONE_IP}",
+    )
+    parser.add_argument(
+        "--mission-path",
+        default=str(DEFAULT_MISSION_PATH),
+        help="Path to the built mission archive.",
+    )
+    args = parser.parse_args()
+
     # initialize the drone
-    drone = olympe.Drone(DRONE_IP)
+    drone = olympe.Drone(args.drone_ip)
+    streamer = None
 
     # 1. Connect to the drone
-    print("Connecting to ANAFI Ai...")
-    assert drone.connect(retry=3), "Connection failed. Check your Wi-Fi link."
+    print(f"Connecting to ANAFI Ai at {args.drone_ip}...")
+    if not drone.connect(retry=3):
+        raise RuntimeError(_connection_error_message(args.drone_ip))
+    
+    drone.get_state(takeoff_checklist)
+    # Traceback (most recent call last):
+    #   File "<stdin>", line 1, in <module>
+    #   File "/home/user/src/sailor/venv38/lib/python3.8/site-packages/olympe/arsdkng/cmd_itf.py", line 754, in get_state
+    #     return self._get_message(message.id).state()
+    #   File "/home/user/src/sailor/venv38/lib/python3.8/site-packages/olympe/arsdkng/messages.py", line 951, in state
+    #     raise RuntimeError(f"{self.fullName} state is uninitialized")
+    # RuntimeError: alarms.takeoff_checklist state is uninitialized
 
-    print(f"Pointing camera to {CAMERA_DOWN_PITCH_DEGREES} degrees pitch...")
-    point_camera_down(drone)
+    alarms = drone.get_state(alarms_anafi)
+    for (k, v) in alarms.items():
+        if v["state"] == AlarmState.on:
+            print(f"ON  {k}")
+        else:
+            print(f"OFF {k}")
 
-    # initialize the stream
-    streamer = SimpleOlympeStream(drone)
-    streamer.start()
-
-
-    # initialize thread for listening to yolo_detection events
-    thread = threading.Thread(target=listen_yolo_events, args=(drone,), daemon=True)
-    thread.start()
-
-    # # Series of flight commands 
-    # takeoff = drone(
-    #     TakeOff()
-    #     >> FlyingStateChanged(state="hovering", _timeout=30)
-    # ).wait(_timeout=35)
-    # print("Takeoff success:", takeoff.success())
-    # if not takeoff.success():
-    #     print(takeoff.explain())
-    #     return
-
-    # # Move up by 5 meters. moveBy dZ is along the down axis, so up is negative.
-    # run_move_by(drone, "Move up", 0.0, 0.0, -1.0, 0.0)
-
-    # # Move forward by 2 meters
-    # run_move_by(drone, "Move forward", 5.0, 0.0, 0.0, 0.0)
-
-    # # Land
-    # drone(
-    #     Landing()
-    #     >> FlyingStateChanged(state="landed", _timeout=10)
-    # ).wait()
+    # print("Alert:", drone.get_state(AlertStateChanged))
 
     try:
-        # Keep the main execution thread alive while the stream thread runs
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        streamer.stop()
-        print("Stream closed cleanly.")
+        print(f"Pointing camera to {CAMERA_DOWN_PITCH_DEGREES} degrees pitch...")
+        # point_camera_down(drone)
+
+        mission_path = _mission_path(args.mission_path)
+        print(f"Using mission archive: {mission_path}")
+
+        with drone.mission.from_path(str(mission_path)):
+            # initialize the stream
+            streamer = SimpleOlympeStream(drone)
+            streamer.start()
+
+            # initialize threads for listening to AirSDK mission events
+            yolo_thread = threading.Thread(
+                target=listen_yolo_events,
+                args=(drone,),
+                daemon=True,
+            )
+            yolo_thread.start()
+
+            position_thread = threading.Thread(
+                target=listen_position_estimation_events,
+                args=(drone,),
+                daemon=True,
+            )
+            position_thread.start()
+
+            # # Series of flight commands
+            # takeoff = drone(
+            #     TakeOff()
+            #     >> FlyingStateChanged(state="hovering", _timeout=30)
+            # ).wait(_timeout=35)
+            # print("Takeoff success:", takeoff.success())
+            # if not takeoff.success():
+            #     print(takeoff.explain())
+            #     return
+
+            # # Move up by 5 meters. moveBy dZ is along the down axis, so up is negative.
+            # run_move_by(drone, "Move up", 0.0, 0.0, -1.0, 0.0)
+
+            # # Move forward by 5 meters
+            # run_move_by(drone, "Move forward", 1.0, 0.0, 0.0, 0.0)
+
+            # # response = drone(
+            # #     NavigateHome(start=1)
+            # #     >> NavigateHomeStateChanged(state="inProgress", _policy="wait")
+            # # ).wait()
+            
+            # # if response.success():
+            # #     print("Success! The drone is now executing NavigateHome.")
+            # # else:
+            # #     print("NavigateHome command failed or timed out.")
+
+
+            # drone(
+            #         Landing()
+            #         >> FlyingStateChanged(state="landed", _timeout=10)
+            #     ).wait()
+
+       
+
+            try:
+                # Keep the main execution thread alive while the stream thread runs
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+
+                # RTH
+                # exp = drone(NavigateHome(start=1)
+                #       >> FlyingStateChanged(state="landed", _policy="wait", _timeout=60)).wait()
+                
+                # if exp.success():
+                #     print("Drone has returned home and landed successfully.")
+                # else:
+                #     print("Failed to return home and land. Reason:", exp.explain())
+
+                 # Land
+                # drone(
+                #     Landing()
+                #     >> FlyingStateChanged(state="landed", _timeout=10)
+                # ).wait()
+                print("Stream closed cleanly.")
+    finally:
+        if streamer is not None:
+            streamer.stop()
+        elif drone.connected:
+            drone.disconnect()
         
     
 
