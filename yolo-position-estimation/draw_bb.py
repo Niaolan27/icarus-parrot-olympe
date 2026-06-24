@@ -179,6 +179,17 @@ class SimpleOlympeStream:
                             (0, 255, 0),  # Green color for the text
                             2,  # Thickness of the text
                         )
+                        if bb.relative is not None:
+                            relative_label = f"Rel: Fwd {bb.relative[0]:.2f} m, Side {bb.relative[1]:.2f} m"
+                            cv2.putText(
+                                cv2_frame,
+                                relative_label,
+                                (x, y + h + 20),  # Position below the bounding box
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.5,  # Font scale
+                                (0, 255, 0),  # Green color for the text
+                                2,  # Thickness of the text
+                            )
                 
 
 
@@ -244,6 +255,8 @@ class BoundingBox:
         self.y = y
         self.width = width
         self.height = height
+        self.center = (x + width / 2, y + height / 2)
+        self.relative = None
 
 def point_camera_down(drone):
     result = drone(
@@ -400,6 +413,9 @@ def listen_yolo_events(drone):
     except KeyboardInterrupt:
         print("Stopping YOLO listener.")
 
+def _is_almost_equal(a, b, tol=10.0):
+    return abs(a - b) < tol
+
 
 def listen_position_estimation_events(drone):
     from olympe.airsdk.messages.parrot.missions.samples.yolo.Event import (
@@ -418,6 +434,16 @@ def listen_position_estimation_events(drone):
 
             for event in expectation.matched_events():
                 for result in event.args["results"]:
+
+                    # get the relative position of the detected object
+                    relative_pos = (_field(result, 'forward_m'), _field(result, 'side_m'))
+                    center = (_field(result, 'x_center'), _field(result, 'y_center'))
+                    # loop through the global_bb to find the corresponding bounding box and update its relative position
+                    with global_bb_lock:
+                        for bb in global_bb:
+                            if (_is_almost_equal(bb.center[0], center[0])) and (_is_almost_equal(bb.center[1], center[1])):
+                                bb.relative = relative_pos
+                                break
                     print(
                         "Received position_estimation_results event: "
                         f"{_format_position_result(result)}"
@@ -451,24 +477,6 @@ def main():
     print(f"Connecting to ANAFI Ai at {args.drone_ip}...")
     if not drone.connect(retry=3):
         raise RuntimeError(_connection_error_message(args.drone_ip))
-    
-    drone.get_state(takeoff_checklist)
-    # Traceback (most recent call last):
-    #   File "<stdin>", line 1, in <module>
-    #   File "/home/user/src/sailor/venv38/lib/python3.8/site-packages/olympe/arsdkng/cmd_itf.py", line 754, in get_state
-    #     return self._get_message(message.id).state()
-    #   File "/home/user/src/sailor/venv38/lib/python3.8/site-packages/olympe/arsdkng/messages.py", line 951, in state
-    #     raise RuntimeError(f"{self.fullName} state is uninitialized")
-    # RuntimeError: alarms.takeoff_checklist state is uninitialized
-
-    alarms = drone.get_state(alarms_anafi)
-    for (k, v) in alarms.items():
-        if v["state"] == AlarmState.on:
-            print(f"ON  {k}")
-        else:
-            print(f"OFF {k}")
-
-    # print("Alert:", drone.get_state(AlertStateChanged))
 
     try:
         print(f"Pointing camera to {CAMERA_DOWN_PITCH_DEGREES} degrees pitch...")

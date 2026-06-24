@@ -24,9 +24,13 @@ command drone movement.
 - `assets/models/` is where exported NCNN model files belong before packaging.
   The default config expects `model.ncnn.param` and `model.ncnn.bin`.
 - `assets/etc/services/cv_road.cfg` configures the model paths, input size,
-  blob names, thresholds, and neutral legacy road-following fields.
+  blob names, thresholds, position-estimation trigger period, and neutral
+  legacy road-following fields.
 - `services/cv_road/` is the AirSDK service that receives camera frames through
-  video IPC and calls the YOLO detector.
+  video IPC, calls the YOLO detector, and publishes detection events.
+- `services/position_estimation/` is the AirSDK Python service that converts
+  detection pixel locations into relative ground positions and estimated
+  latitude/longitude values.
 
 ## Build Wiring
 
@@ -74,6 +78,21 @@ services:
       - yolo_detector
 ```
 
+The `position_estimation` service is a Python service. It subscribes to
+`cv_road` events and publishes its own results through a second message-hub
+channel:
+
+```yaml
+services:
+  position_estimation:
+    lang: python
+    depends:
+      - libmsghub
+      - msghub::mission_ui
+      - msghub::cv_road
+      - msghub::position_estimation
+```
+
 ## Exporting A YOLO Model To NCNN
 
 Export the trained YOLO model into NCNN's two-file format:
@@ -112,10 +131,11 @@ yoloBinPath = "models/model.ncnn.bin";
 yoloInputBlob = "";
 yoloOutputBlob = "";
 yoloInputWidth = 320;
-yoloInputHeight = 320;
-yoloConfidenceThreshold = 0.1;
+yoloInputHeight = 192;
+yoloConfidenceThreshold = 0.50;
 yoloNmsThreshold = 0.45;
 STREAM_YOLO_DETECTIONS = true;
+positionEstimationTriggerPeriodSeconds = 0.50;
 ```
 
 Paths are resolved against the installed mission root. During packaging, files
@@ -134,22 +154,96 @@ The detector letterboxes each camera frame into that size before inference.
 Set `STREAM_YOLO_DETECTIONS` to `true` to publish `yolo_detections` events to
 Olympe, or `false` to keep detections local to service logs.
 
+`positionEstimationTriggerPeriodSeconds` controls how often `cv_road` sends a
+batch of detections to the position-estimation service. Fractional values are
+supported, so `0.50` means one trigger every half second. Set it to `0` or a
+negative value to disable position-estimation triggers.
+
 The other fields in the `road_following` section are legacy fields still read by
 the service. In this example they are set to neutral values.
+
+## Position Estimation Algorithm
+
+Position estimation starts in `cv_road`. When the trigger period elapses, the
+service packages the current frame timestamp, frame size, and YOLO detections
+into a `position_estimation_trigger` event. Each detection contains the class id,
+confidence, and bounding box in image pixels.
+
+The Python `position_estimation` service listens for those trigger events. For
+each detection, it uses the bounding-box center:
+
+```text
+x_center = x + width / 2
+y_center = y + height / 2
+```
+
+`PixelLocationFinder` then treats that center pixel as a camera ray. The helper
+builds a simple pinhole-camera model from the frame width, frame height, and
+horizontal field of view. Pixel coordinates are normalized around the image
+center, converted into a ray in camera coordinates, pitched by the camera tilt,
+and intersected with the ground plane at the configured above-ground altitude.
+
+The first result is a local position relative to the drone's nadir point:
+
+- `forward_m`: distance in front of the drone/camera projection.
+- `side_m`: lateral distance from that projection.
+
+The same local vector is rotated by the configured heading to produce
+north/east offsets:
+
+- `north_m`
+- `east_m`
+
+Finally, the north/east offset is added to the configured reference GPS point
+using an Earth-radius approximation. The published result contains both the
+relative position and the estimated geographic position:
+
+- `timestamp_ms`
+- `class_id`
+- `confidence`
+- `x_center`, `y_center`
+- `forward_m`, `side_m`
+- `north_m`, `east_m`
+- `latitude`, `longitude`
+
+The current implementation uses constants in
+`services/position_estimation/main.py`:
+
+```python
+FOV_DEGREES = 68.0
+CAMERA_TILT_DEGREES = -80.0
+AGL_ALTITUDE_METERS = 120
+HEADING_DEGREES = 90
+LATITUDE_DEGREES = 44.68
+LONGITUDE_DEGREES = -0.70
+```
+
+These values are placeholders for the camera model and drone state. For accurate
+positions, replace them with telemetry-backed values for the real frame: camera
+field of view, gimbal pitch, AGL altitude, heading, latitude, and longitude.
+Errors in tilt or altitude directly move the ground intersection, so the output
+should be treated as an estimate until those inputs are tied to live telemetry.
 
 ## Runtime Flow
 
 1. AirSDK starts the `cv_road` C++ service in the selected target environment.
-2. `Processing` loads `cv_road.cfg`.
-3. The configured NCNN `.param` and `.bin` files are loaded by
+2. AirSDK starts the `position_estimation` Python service.
+3. `Processing` loads `cv_road.cfg`.
+4. The configured NCNN `.param` and `.bin` files are loaded by
    `yolo_detector::Detector`.
-4. The service receives video frames from video IPC.
-5. The frame is converted from the drone YUV format into an OpenCV image.
-6. The detector resizes and letterboxes the image, normalizes pixels, and sends
+5. The service receives video frames from video IPC.
+6. The frame is converted from the drone YUV format into an OpenCV image.
+7. The detector resizes and letterboxes the image, normalizes pixels, and sends
    it through NCNN.
-7. YOLO detections are decoded into class id, confidence, and bounding box.
-8. Detections are logged with `ulog`; they are not currently used to drive a
-   guidance behavior.
+8. YOLO detections are decoded into class id, confidence, and bounding box.
+9. If streaming is enabled, detections are published as `yolo_detections`.
+10. At the configured trigger period, `cv_road` sends detections and frame
+   metadata to `position_estimation`.
+11. `position_estimation` converts detection centers into relative, north/east,
+    and latitude/longitude estimates, then publishes
+    `position_estimation_results`.
+12. The flight supervisor relays YOLO detections and position-estimation results
+    to the Olympe-facing mission messages.
 
 The current detector runs NCNN on CPU:
 

@@ -83,3 +83,15 @@ To see that the model runs, you want to set up the environment and drone, then i
 Once the mission is installed, the YOLO service automatically starts running. To see the results of the inference,
 you need to run `adb shell` and use `ulogcat | grep YOLO` to see log messages related to the YOLO service. 
 
+## yolo-position-estimation
+In this mission, I added a service which runs the position estimation algorithm alongside the CV service. At fixed intervals,
+the service will run the position estimation algorithm on the bounding boxes detected at that time. 
+
+The algorithm assumes that the target is on the ground level (Z = 0). For a given pixel, it is able to project a 
+camera ray from the camera (using a pinhole camera model), and making the ray intersect with the ground. From there,
+since you know the altitude of the drone and the pitch of the camera, you can solve for the X and Y displacement of
+the target object relative to the drone. 
+
+## Installing the mission on the physical drone
+### Security
+You need to set up the security key on the drone. 
