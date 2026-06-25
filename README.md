@@ -1,5 +1,11 @@
 # icarus-parrot-olympe
-## parrot airsdk setup
+This repository includes several projects focused on testing the capabilities of the Parrot AirSDK. It aims to explore
+how much computation you can perform onboard the Parrot drones themselves.
+
+The Parrot AirSDK is mainly supported on the Parrot Anafi Ai and Parrot Anafi UKR. However, all of these projects are
+tested and run on the Parrot Anafi, both in real life and in the Sphinx simulator.
+
+## Parrot AirSDK Setup
 
 First you need to add Parrot packages as a trusted source.
 ```
@@ -13,7 +19,7 @@ Next, install airsdk-cli.
 sudo apt install parrot-airsdk-cli
 ```
 
-## sphinx setup
+## Sphinx Setup
 
 Run these commands to launch the Sphinx simulator and an Anafi Ai drone.
 ```
@@ -31,15 +37,37 @@ sudo apt update
 apt-cache search parrot-ue
 ```
 
-The following code is to gain shell access to the Anafi. This allows you to view the logs from ulog.
+## Shell Access
+
+The following code is to gain shell access to the Anafi. This allows you to view the logs from ulog. This is very useful for
+debugging whether your service is running correctly on the drone. 
+
+You need to enable shell access under developer settings. You can find the instructions in the link below.
+
+Anafi UKR: https://developer.parrot.com/docs/airsdk/general/developer_settings_for_anafi_ukr.html#shell-access
+Anafi Ai: https://developer.parrot.com/docs/airsdk/user_guide/developer_settings_for_anafi_ai.html#developer-settings-for-anafi-ai
+
 ```
 adb connect anafi-ai.local:9050
 adb shell
 ```
 
+## Installing the mission on the physical drone
+### Security
+You need to set up the security key on the drone. You need to set up a private/public key. More instructions can be found 
+here https://developer.parrot.com/docs/airsdk/general/security.html.
+
+If you don't set up the security key, the mission would not be installed onto the drone. 
+
+# Project Examples
+
+Here are several examples of projects testing out different capabilities.
+
 ## jason-move
 I am testing out using the AirSDK directly to create a mission. I build the mission and load it onto the drone itself.
-Note: when you install the mission onto the drone, wait for around 30 seconds for the drone to reboot successfully.
+The drone moves in simple preset trajectory.
+Note: when you install the mission onto the drone, the drone reboots by default. Ensure that you allow the drone enough
+time before you launch the drone. Otherwise the mission may not boot correctly.
 
 ```
 airsdk build
@@ -51,17 +79,21 @@ python takeoff.py
 ## olympe-airsdk
 This requires AirSDK version 8.4 and higher. 
 I want to test out the capabilities of running Olympe within AirSDK. The idea is that I can use Olympe within
-AirSDK. So, instead of having to write C/C++ code in AirSDK, I can use Olympe instead.
+AirSDK. So, instead of having to write C/C++ code in AirSDK, I can use Olympe instead. There are some examples
+provided by Parro themselves.
 
-Olympe was previously meant for controlling drones from the ground station.
+Olympe is a separate SDK that is meant for controlling drones from the ground station. You can send Olympe
+commands to the drone to control it.
 
-Turns out I cannot really test out the capabilities because Anafi Ai does not support SDK version 8.4.0. 
-You need to run the Anafi UKR.
+Note: I could not test this capability because it is a new feature on the AirSDK 8.4.0. This new version is only
+supported on the Anafi UKR and not the Anafi Ai. 
 
 ## road_runner
-This is a comprehensive mission that runs both services and guidance modes. The drone runs a computer vision
-algorithm on the video frames, identifying the center road line. From there, it calculates the necessary movement
-to follow the road.
+This is an example project from Parrot themselves. It is a comprehensive mission that runs both services and guidance modes. 
+The drone runs a computer vision algorithm on the video frames, identifying the center road line. From there, it calculates 
+the necessary movement to follow the road.
+
+This is a good example project to figure out how services, guidance modes and the flight supervisor interact with one another.
 
 The guidance mode makes the drone follow the road based on the calculated movements from the service.
 
@@ -92,6 +124,3 @@ camera ray from the camera (using a pinhole camera model), and making the ray in
 since you know the altitude of the drone and the pitch of the camera, you can solve for the X and Y displacement of
 the target object relative to the drone. 
 
-## Installing the mission on the physical drone
-### Security
-You need to set up the security key on the drone. 
